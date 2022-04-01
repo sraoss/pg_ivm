@@ -116,7 +116,7 @@ On the other hand, after creating IMMV with the same view definition as below:
 
 ```
 test=# SELECT create_immv('immv',
-        `SELECT a.aid, b.bid, a.abalance, b.bbalance
+        'SELECT a.aid, b.bid, a.abalance, b.bbalance
          FROM pgbench_accounts a JOIN pgbench_branches b USING(bid)');
 NOTICE:  created index "immv_index" on immv "immv"
  create_immv 
