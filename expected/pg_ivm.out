@@ -20,7 +20,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           4
 (1 row)
 
 SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
@@ -86,7 +86,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           1
 (1 row)
 
 SELECT create_immv('mv_ivm_no_tbl', 'SELECT 1');
@@ -95,7 +95,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           1
 (1 row)
 
 ROLLBACK;
@@ -107,14 +107,14 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           5
 (1 row)
 
 SELECT create_immv('mv_ivm_distinct', 'SELECT DISTINCT j FROM mv_base_a');
 NOTICE:  created index "mv_ivm_distinct_index" on immv "mv_ivm_distinct"
  create_immv 
 -------------
- 
+           5
 (1 row)
 
 INSERT INTO mv_base_a VALUES(6,20);
@@ -175,7 +175,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           3
 (1 row)
 
 SELECT * FROM mv_self ORDER BY v1;
@@ -230,7 +230,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           3
 (1 row)
 
 SELECT * FROM mv ORDER BY v1;
@@ -273,7 +273,7 @@ SELECT create_immv('mv_ri(i1, i2)', 'SELECT ri1.i, ri2.i FROM ri1 JOIN ri2 USING
 NOTICE:  created index "mv_ri_index" on immv "mv_ri"
  create_immv 
 -------------
- 
+           3
 (1 row)
 
 SELECT * FROM mv_ri ORDER BY i1;
@@ -304,7 +304,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           2
 (1 row)
 
 SELECT * FROM mv ORDER BY i;
@@ -331,7 +331,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           0
 (1 row)
 
 SELECT * FROM mv ORDER BY i;
@@ -392,7 +392,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           0
 (1 row)
 
 INSERT INTO t_mytype VALUES ('1'::mytype);
@@ -510,7 +510,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           1
 (1 row)
 
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
@@ -535,7 +535,7 @@ DETAIL:  This target list does not have all the primary key columns, or this vie
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
- 
+           2
 (1 row)
 
 RESET SESSION AUTHORIZATION;
@@ -560,6 +560,15 @@ drop cascades to table ivm_rls2
 DROP TABLE num_tbl CASCADE;
 DROP USER ivm_user;
 DROP USER ivm_admin;
+-- prevent IMMV chanages
+INSERT INTO mv_ivm_1 VALUES(1,1,1);
+ERROR:  cannot change materialized view "mv_ivm_1"
+UPDATE  mv_ivm_1 SET k = 1 WHERE i = 1;
+ERROR:  cannot change materialized view "mv_ivm_1"
+DELETE FROM mv_ivm_1;
+ERROR:  cannot change materialized view "mv_ivm_1"
+TRUNCATE mv_ivm_1;
+ERROR:  cannot change materialized view "mv_ivm_1"
 DROP TABLE mv_base_b CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table mv_ivm_1
