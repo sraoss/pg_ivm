@@ -189,3 +189,8 @@ IVM Development Group
 
 ## License
 [PostgreSQL License](https://github.com/sraoss/pg_ivm/blob/main/LICENSE)
+
+## Copyright
+- Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
+- Portions Copyright (c) 2022, IVM Development Group
+
