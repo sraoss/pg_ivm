@@ -1,6 +1,6 @@
 # pg_ivm
 
-The `pg_ivm` module provides Incremnetal View Maintenance (IVM) feature for PostgreSQL. 
+The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL. 
 
 The extension is compatible with PostgreSQL 14.
 
@@ -54,7 +54,7 @@ postgres=# SELECT * FROM m; -- automatically updated
 (4 rows)
 ```
 
-## Installaion
+## Installation
 To install `pg_ivm`, execute this in the module's directory:
 
 ```shell
