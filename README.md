@@ -58,7 +58,7 @@ postgres=# SELECT * FROM m; -- automatically updated
 To install `pg_ivm`, execute this in the module's directory:
 
 ```shell
-make install USE_PGXS=1
+make install
 ```
 
 If you installed PostgreSQL from rpm or deb, you will need the devel package (for example, postgresql14-devel or postgresql-server-dev-14).
