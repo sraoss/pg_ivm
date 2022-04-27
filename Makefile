@@ -1,19 +1,18 @@
 # contrib/pg_ivm/Makefile
 
-MODULES = pg_ivm
+MODULE_big = pg_ivm
+OBJS = \
+	$(WIN32RES) \
+	createas.o \
+	matview.o \
+	pg_ivm.o
+PGFILEDESC = "pg_ivm - incremental view maintenance on PostgreSQL"
+
 EXTENSION = pg_ivm
 DATA = pg_ivm--1.0.sql
 
-
 REGRESS = pg_ivm
 
-ifdef USE_PGXS
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
-else
-subdir = contrib/pg_ivm
-top_builddir = ../..
-include $(top_builddir)/src/Makefile.global
-include $(top_srcdir)/contrib/contrib-global.mk
-endif
