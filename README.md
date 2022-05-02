@@ -81,7 +81,7 @@ Use `create_immv` function to creae IMMV.
 ```
 create_immv(immv_name text, view_definition text) RETURNS bigint
 ```
-`create_immv` defined a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the creaetd IMMV.
+`create_immv` defined a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
 When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes. Or, if the view has DISTINCT clause, a unique index is created on all columns in the target list. In other cases, no index is created.
 
