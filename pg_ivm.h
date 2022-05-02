@@ -10,7 +10,7 @@
  */
 
 #ifndef _PG_IVM_H_
-#define PG_IVM_H_
+#define _PG_IVM_H_
 
 #include "catalog/objectaddress.h"
 #include "fmgr.h"
