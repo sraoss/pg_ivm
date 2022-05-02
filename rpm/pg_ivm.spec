@@ -50,8 +50,7 @@ This packages provides JIT support for pg_ivm
 %setup -q -n %{sname}-%{version}
 
 %build
-%configure PG_CONFIG=%{pginstdir}/bin/pg_config
-make %{?_smp_mflags}
+make %{?_smp_mflags} PG_CONFIG=%{pginstdir}/bin/pg_config
 
 %install
 %make_install
