@@ -72,7 +72,7 @@ CREATE EXTENSION pg_ivm;
 ```
 ### RPM packages and yum repository
 
-RPM packages of pg_ivm may be available from the [PostgreSQL yum repository](https://yum.postgresql.org/). See the [instruction](https://yum.postgresql.org/howto/) for details.
+RPM packages of pg_ivm are available from the [PostgreSQL yum repository](https://yum.postgresql.org/). See the [instruction](https://yum.postgresql.org/howto/) for details.
 
 ## Objects
 
