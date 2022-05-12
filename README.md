@@ -70,6 +70,9 @@ And, execute CREATE EXTENSION comand.
 ```
 CREATE EXTENSION pg_ivm;
 ```
+### RPM packages and yum repository
+
+RPM packages of pg_ivm may be available from the [PostgreSQL yum repositoy](https://yum.postgresql.org/). See the [instruction](https://yum.postgresql.org/howto/) for details.
 
 ## Objects
 
