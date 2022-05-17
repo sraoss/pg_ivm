@@ -11,6 +11,7 @@
  */
 #include "postgres.h"
 
+#include "access/xact.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "catalog/dependency.h"
@@ -69,6 +70,10 @@ static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_conte
 static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_create);
 
 static void StoreImmvQuery(Oid viewOid, Query *viewQuery);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
+static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
+#endif
 
 /*
  * ExecCreateImmv -- execute a create_immv() function
@@ -286,7 +291,11 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 	{
 		rewritten->groupClause = transformDistinctClause(NULL, &rewritten->targetList, rewritten->sortClause, false);
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+#else
+		fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+#endif
 		fn->agg_star = true;
 
 		node = ParseFuncOrColumn(pstate, fn->funcname, NIL, NULL, fn, false, -1);
@@ -869,8 +878,9 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 	int i;
 	Bitmapset *keys = NULL;
 	Relids	rels_in_from;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	PlannerInfo root;
-
+#endif
 
 	/*
 	 * Collect primary key attributes from all tables used in query. The key attributes
@@ -939,8 +949,11 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 	}
 
 	/* Collect relations appearing in the FROM clause */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	rels_in_from = pull_varnos_of_level(&root, (Node *)query->jointree, 0);
-
+#else
+	rels_in_from = pull_varnos_of_level((Node *)query->jointree, 0);
+#endif
 	/*
 	 * Check if all key attributes of relations in FROM are appearing in the target
 	 * list.  If an attribute remains in key_attnos_list in spite of the table is used
@@ -997,3 +1010,39 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	CommandCounterIncrement();
 }
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
+/*
+ * CreateTableAsRelExists --- check existence of relation for CreateTableAsStmt
+ *
+ * Utility wrapper checking if the relation pending for creation in this
+ * CreateTableAsStmt query already exists or not.  Returns true if the
+ * relation exists, otherwise false.
+ */
+static bool
+CreateTableAsRelExists(CreateTableAsStmt *ctas)
+{
+	Oid			nspid;
+	IntoClause *into = ctas->into;
+
+	nspid = RangeVarGetCreationNamespace(into->rel);
+
+	if (get_relname_relid(into->rel->relname, nspid))
+	{
+		if (!ctas->if_not_exists)
+			ereport(ERROR,
+					(errcode(ERRCODE_DUPLICATE_TABLE),
+					 errmsg("relation \"%s\" already exists",
+							into->rel->relname)));
+
+		/* The relation exists and IF NOT EXISTS has been specified */
+		ereport(NOTICE,
+				(errcode(ERRCODE_DUPLICATE_TABLE),
+				 errmsg("relation \"%s\" already exists, skipping",
+						into->rel->relname)));
+		return true;
+	}
+
+	/* Relation does not exist, it can be created */
+	return false;
+}
+#endif
