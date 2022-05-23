@@ -10,13 +10,13 @@ The extension is compatible with PostgreSQL 14.
 
 There are two approaches with regard to timing of view maintenance: immediate and deferred.  In immediate maintenance, views are updated in the same transaction that its base table is modified.  In deferred maintenance, views are updated after the transaction is committed, for example, when the view is accessed, as a response to user command like `REFRESH MATERIALIZED VIEW`, or periodically in background, and so on. `pg_ivm` provides a kind of immediate maintenance, in which materialized views are updated immediately in AFTER triggers when a base table is modified.
 
- We call a materialized view supporting IVM an **Incrementally Maintainable Materialized View (IMMV)**. To create IMMV, you have to call `create_immv` function with a relation name and a view definition query. For example:
+We call a materialized view supporting IVM an **Incrementally Maintainable Materialized View (IMMV)**. To create IMMV, you have to call `create_immv` function with a relation name and a view definition query. For example:
 
 ```sql
 SELECT create_immv('myview', 'SELECT * FROM mytab');
 ```
 
-creates an IMMV with name 'myview' defined as 'SELECT * FROM mytab'. This is corresponding to the following command to create a normal materialized view;
+creates an IMMV with name 'myview' defined as `SELECT * FROM mytab`. This is corresponding to the following command to create a normal materialized view;
 
 ```sql
 CREATE MATERIALIZED VIEW myview AS SELECT * FROM mytab;
@@ -80,7 +80,7 @@ When `pg_ivm` is installed, the following objects are created.
 
 ### IMMV creation function
 
-Use `create_immv` function to creae IMMV.
+Use `create_immv` function to create IMMV.
 ```
 create_immv(immv_name text, view_definition text) RETURNS bigint
 ```
