@@ -29,11 +29,11 @@ are computed and applied on views rather than recomputing.
 %setup -q -n %{sname}-%{version}
 
 %build
-PG_CONFIG=%{pginstdir}/bin/pg_config %{__make} %{?_smp_mflags}
+PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags}
 
 %install
 %{__rm} -rf %{buildroot}
-PG_CONFIG=%{pginstdir}/bin/pg_config %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot} DESTDIR=%{buildroot} install
+PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot} DESTDIR=%{buildroot} install
 
 # Install documentation with a better name:
 %{__mkdir} -p %{buildroot}%{pginstdir}/doc/extension
