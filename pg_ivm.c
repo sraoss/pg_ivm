@@ -185,7 +185,11 @@ create_immv(PG_FUNCTION_ARGS)
 
 	ctas = makeNode(CreateTableAsStmt);
 	ctas->query = parsetree->stmt;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	ctas->objtype = OBJECT_MATVIEW;
+#else
+	ctas->relkind = OBJECT_MATVIEW;
+#endif
 	ctas->is_select_into = false;
 	ctas->into = makeNode(IntoClause);
 	ctas->into->rel = makeRangeVarFromNameList(names);

@@ -25,6 +25,7 @@
 #include "parser/parse_clause.h"
 #include "parser/parse_func.h"
 #include "parser/parse_relation.h"
+#include "parser/parser.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
@@ -566,13 +567,19 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 
 		old_tuplestore = tuplestore_begin_heap(false, false, work_mem);
 		dest_old = CreateDestReceiver(DestTuplestore);
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		SetTuplestoreDestReceiverParams(dest_old,
 									old_tuplestore,
 									TopTransactionContext,
 									false,
 									NULL,
 									NULL);
-
+#else
+		SetTuplestoreDestReceiverParams(dest_old,
+									old_tuplestore,
+									TopTransactionContext,
+									false);
+#endif
 		MemoryContextSwitchTo(oldcxt);
 	}
 	if (entry->has_new)
@@ -581,12 +588,19 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 
 		new_tuplestore = tuplestore_begin_heap(false, false, work_mem);
 		dest_new = CreateDestReceiver(DestTuplestore);
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		SetTuplestoreDestReceiverParams(dest_new,
 									new_tuplestore,
 									TopTransactionContext,
 									false,
 									NULL,
 									NULL);
+#else
+		SetTuplestoreDestReceiverParams(dest_new,
+									new_tuplestore,
+									TopTransactionContext,
+									false);
+#endif
 		MemoryContextSwitchTo(oldcxt);
 	}
 
@@ -843,7 +857,12 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 			make_delta_enr_name("old", table->table_id, i));
 	}
 
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
+#else
+	raw = (RawStmt*)linitial(raw_parser(str.data));
+#endif
 	sub = transformStmt(pstate, raw->stmt);
 
 	/* If this query has setOperations, RTEs in rtables has a subquery which contains ENR */
@@ -942,7 +961,11 @@ union_ENRs(RangeTblEntry *rte, Oid relid, List *enr_rtes, const char *prefix,
 			make_delta_enr_name(prefix, relid, i));
 	}
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
+#else
+	raw = (RawStmt*)linitial(raw_parser(str.data));
+#endif
 	sub = transformStmt(pstate, raw->stmt);
 
 	rte->rtekind = RTE_SUBQUERY;
@@ -982,7 +1005,11 @@ rewrite_query_for_distinct(Query *query, ParseState *pstate)
 	Node *node;
 
 	/* Add count(*) for counting distinct tuples in views */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+#else
+	fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+#endif
 	fn->agg_star = true;
 	if (!query->groupClause && !query->hasAggs)
 		query->groupClause = transformDistinctClause(NULL, &query->targetList, query->sortClause, false);
