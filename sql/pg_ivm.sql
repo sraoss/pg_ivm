@@ -1,4 +1,5 @@
 CREATE EXTENSION pg_ivm;
+GRANT ALL ON SCHEMA public TO public;
 
 -- create a table to use as a basis for views and materialized views in various combinations
 CREATE TABLE mv_base_a (i int, j int);
