@@ -15,3 +15,5 @@ SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
 
 DROP TABLE mv2;
 SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
+
+DROP TABLE t;

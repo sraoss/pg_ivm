@@ -12,8 +12,14 @@
 #include "postgres.h"
 
 #include "access/genam.h"
+#include "access/multixact.h"
 #include "access/table.h"
 #include "access/xact.h"
+#include "catalog/pg_depend.h"
+#include "catalog/heap.h"
+#include "catalog/pg_trigger.h"
+#include "commands/cluster.h"
+#include "commands/matview.h"
 #include "commands/tablecmds.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
@@ -26,6 +32,7 @@
 #include "parser/parse_func.h"
 #include "parser/parse_relation.h"
 #include "parser/parser.h"
+#include "pgstat.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
@@ -92,6 +99,7 @@ static uint64 refresh_immv_datafill(DestReceiver *dest, Query *query,
 						 TupleDesc *resultTupleDesc,
 						 const char *queryString);
 
+static void refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence);
 static void OpenImmvIncrementalMaintenance(void);
 static void CloseImmvIncrementalMaintenance(void);
 static Query *get_immv_query(Relation matviewRel);
@@ -137,6 +145,252 @@ static List *get_securityQuals(Oid relId, int rt_index, Query *query);
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
 PG_FUNCTION_INFO_V1(IVM_immediate_maintenance);
+
+/*
+ * ExecRefreshImmv -- execute a refresh_immv() function
+ *
+ * This imitates PostgreSQL's ExecRefreshMatView().
+ */
+ObjectAddress
+ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
+{
+	Oid			matviewOid;
+	Relation	matviewRel;
+	Query	   *dataQuery;
+	Query	   *viewQuery;
+	Oid			tableSpace;
+	Oid			relowner;
+	Oid			OIDNewHeap;
+	DestReceiver *dest;
+	uint64		processed = 0;
+	//bool		concurrent;
+	LOCKMODE	lockmode;
+	char		relpersistence;
+	Oid			save_userid;
+	int			save_sec_context;
+	int			save_nestlevel;
+	ObjectAddress address;
+	Relation pgIvmImmv;
+	TupleDesc tupdesc;
+	ScanKeyData key;
+	SysScanDesc scan;
+	HeapTuple	tup;
+	bool isnull;
+	Datum datum;
+	bool oldSkipData;
+
+	/* Determine strength of lock needed. */
+	//concurrent = stmt->concurrent;
+	//lockmode = concurrent ? ExclusiveLock : AccessExclusiveLock;
+	lockmode = AccessExclusiveLock;
+
+	/*
+	 * Get a lock until end of transaction.
+	 */
+	matviewOid = RelnameGetRelid(relname);
+	if (!OidIsValid(matviewOid))
+	    ereport(ERROR,
+		    (errcode(ERRCODE_UNDEFINED_TABLE),
+		     errmsg("relation \"%s\" does not exist", relname)));
+
+	matviewRel = table_open(matviewOid, lockmode);
+	relowner = matviewRel->rd_rel->relowner;
+
+	/*
+	 * Switch to the owner's userid, so that any functions are run as that
+	 * user.  Also lock down security-restricted operations and arrange to
+	 * make GUC variable changes local to this command.
+	 */
+	GetUserIdAndSecContext(&save_userid, &save_sec_context);
+	SetUserIdAndSecContext(relowner,
+						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
+	save_nestlevel = NewGUCNestLevel();
+
+	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
+	tupdesc = RelationGetDescr(pgIvmImmv);
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationGetRelid(matviewRel)));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		elog(ERROR, "could not find tuple for immvrelid %s", relname);
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_withnodata, tupdesc, &isnull);
+	Assert(!isnull);
+	oldSkipData = (bool)(DatumGetBool(datum));
+
+	/* update pg_ivm_immv view */
+	if (skipData != oldSkipData)
+	{
+		Datum values[Natts_pg_ivm_immv];
+		bool nulls[Natts_pg_ivm_immv];
+		bool replaces[Natts_pg_ivm_immv];
+		HeapTuple newtup = NULL;
+
+		memset(values, 0, sizeof(values));
+		values[Anum_pg_ivm_immv_withnodata -1 ] = BoolGetDatum(skipData);
+		MemSet(nulls, false, sizeof(nulls));
+		MemSet(replaces, false, sizeof(replaces));
+		replaces[Anum_pg_ivm_immv_withnodata -1 ] = true;
+
+		newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
+
+   		CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+		heap_freetuple(newtup);
+	}
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+
+	viewQuery = get_immv_query(matviewRel);
+
+	/* For IMMV, we need to rewrite matview query */
+	if (!skipData)
+		dataQuery = rewriteQueryForIMMV(viewQuery,NIL);
+
+	/*
+	 * Check for active uses of the relation in the current transaction, such
+	 * as open scans.
+	 *
+	 * NB: We count on this to protect us against problems with refreshing the
+	 * data using TABLE_INSERT_FROZEN.
+	 */
+	CheckTableNotInUse(matviewRel, "refresh an IMMV");
+
+	tableSpace = matviewRel->rd_rel->reltablespace;
+	relpersistence = matviewRel->rd_rel->relpersistence;
+
+	/* delete IMMV triggers. */
+	if (skipData)
+	{
+		Relation	tgRel;
+		Relation	depRel;
+		ScanKeyData key;
+		SysScanDesc scan;
+		HeapTuple	tup;
+		ObjectAddresses *immv_triggers;
+
+		immv_triggers = new_object_addresses();
+
+		tgRel = table_open(TriggerRelationId, RowExclusiveLock);
+		depRel = table_open(DependRelationId, RowExclusiveLock);
+
+		/* search triggers that depends on IMMV. */
+		ScanKeyInit(&key,
+					Anum_pg_depend_refobjid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(matviewOid));
+		scan = systable_beginscan(depRel, DependReferenceIndexId, true,
+								  NULL, 1, &key);
+		while ((tup = systable_getnext(scan)) != NULL)
+		{
+			ObjectAddress obj;
+			Form_pg_depend foundDep = (Form_pg_depend) GETSTRUCT(tup);
+
+			if (foundDep->classid == TriggerRelationId)
+			{
+				HeapTuple	tgtup;
+				ScanKeyData tgkey[1];
+				SysScanDesc tgscan;
+				Form_pg_trigger tgform;
+
+				/* Find the trigger name. */
+				ScanKeyInit(&tgkey[0],
+							Anum_pg_trigger_oid,
+							BTEqualStrategyNumber, F_OIDEQ,
+							ObjectIdGetDatum(foundDep->objid));
+
+				tgscan = systable_beginscan(tgRel, TriggerOidIndexId, true,
+											NULL, 1, tgkey);
+				tgtup = systable_getnext(tgscan);
+				if (!HeapTupleIsValid(tgtup))
+					elog(ERROR, "could not find tuple for immv trigger %u", foundDep->objid);
+
+				tgform = (Form_pg_trigger) GETSTRUCT(tgtup);
+
+				/* If trigger is created by IMMV, delete it. */
+				if (strncmp(NameStr(tgform->tgname), "IVM_trigger_", 12) == 0)
+				{
+					obj.classId = foundDep->classid;
+					obj.objectId = foundDep->objid;
+					obj.objectSubId = foundDep->refobjsubid;
+					add_exact_object_address(&obj, immv_triggers);
+				}
+				systable_endscan(tgscan);
+			}
+		}
+		systable_endscan(scan);
+
+		performMultipleDeletions(immv_triggers, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+
+		table_close(depRel, RowExclusiveLock);
+		table_close(tgRel, RowExclusiveLock);
+		free_object_addresses(immv_triggers);
+	}
+
+	/*
+	 * Create the transient table that will receive the regenerated data. Lock
+	 * it against access by any other process until commit (by which time it
+	 * will be gone).
+	 */
+	OIDNewHeap = make_new_heap(matviewOid, tableSpace,
+							   relpersistence, ExclusiveLock);
+	LockRelationOid(OIDNewHeap, AccessExclusiveLock);
+	dest = CreateTransientRelDestReceiver(OIDNewHeap);
+
+	/* Generate the data, if wanted. */
+	if (!skipData)
+		processed = refresh_immv_datafill(dest, dataQuery, NULL, NULL, "");
+
+	/* Make the matview match the newly generated data. */
+	refresh_by_heap_swap(matviewOid, OIDNewHeap, relpersistence);
+
+	/*
+	 * Inform cumulative stats system about our activity: basically, we
+	 * truncated the matview and inserted some new data.  (The concurrent
+	 * code path above doesn't need to worry about this because the
+	 * inserts and deletes it issues get counted by lower-level code.)
+	 */
+	pgstat_count_truncate(matviewRel);
+	if (!skipData)
+		pgstat_count_heap_insert(matviewRel, processed);
+
+	if (!skipData && oldSkipData)
+	{
+		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid, true);
+	}
+
+	table_close(matviewRel, NoLock);
+
+	/* Roll back any GUC changes */
+	AtEOXact_GUC(false, save_nestlevel);
+
+	/* Restore userid and security context */
+	SetUserIdAndSecContext(save_userid, save_sec_context);
+
+	ObjectAddressSet(address, RelationRelationId, matviewOid);
+
+	/*
+	 * Save the rowcount so that pg_stat_statements can track the total number
+	 * of rows processed by REFRESH MATERIALIZED VIEW command. Note that we
+	 * still don't display the rowcount in the command completion tag output,
+	 * i.e., the display_rowcount flag of CMDTAG_REFRESH_MATERIALIZED_VIEW
+	 * command tag is left false in cmdtaglist.h. Otherwise, the change of
+	 * completion tag output might break applications using it.
+	 */
+	if (qc)
+		SetQueryCompletion(qc, CMDTAG_SELECT, processed);
+
+	return address;
+}
+
 
 /*
  * refresh_immv_datafill
@@ -210,6 +464,17 @@ refresh_immv_datafill(DestReceiver *dest, Query *query,
 	return processed;
 }
 
+/*
+ * Swap the physical files of the target and transient tables, then rebuild
+ * the target's indexes and throw away the transient table.  Security context
+ * swapping is handled by the called function, so it is not needed here.
+ */
+static void
+refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence)
+{
+	finish_heap_swap(matviewOid, OIDNewHeap, false, false, true, true,
+					 RecentXmin, ReadNextMultiXactId(), relpersistence);
+}
 
 /*
  * This should be used to test whether the backend is in a context where it is

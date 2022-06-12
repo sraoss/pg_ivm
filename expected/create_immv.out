@@ -41,3 +41,4 @@ SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
 -----------
 (0 rows)
 
+DROP TABLE t;
