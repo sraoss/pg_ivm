@@ -214,17 +214,15 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 				ObjectIdGetDatum(RelationGetRelid(matviewRel)));
 	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
 								  true, NULL, 1, &key);
-
 	tup = systable_getnext(scan);
-
 	if (!HeapTupleIsValid(tup))
 	{
 		elog(ERROR, "could not find tuple for immvrelid %s", relname);
 	}
 
-	datum = heap_getattr(tup, Anum_pg_ivm_immv_withnodata, tupdesc, &isnull);
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_ispopulated, tupdesc, &isnull);
 	Assert(!isnull);
-	oldSkipData = (bool)(DatumGetBool(datum));
+	oldSkipData = !DatumGetBool(datum);
 
 	/* update pg_ivm_immv view */
 	if (skipData != oldSkipData)
@@ -235,10 +233,10 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 		HeapTuple newtup = NULL;
 
 		memset(values, 0, sizeof(values));
-		values[Anum_pg_ivm_immv_withnodata -1 ] = BoolGetDatum(skipData);
+		values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(!skipData);
 		MemSet(nulls, false, sizeof(nulls));
 		MemSet(replaces, false, sizeof(replaces));
-		replaces[Anum_pg_ivm_immv_withnodata -1 ] = true;
+		replaces[Anum_pg_ivm_immv_ispopulated -1 ] = true;
 
 		newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
 

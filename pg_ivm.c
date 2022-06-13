@@ -156,7 +156,6 @@ create_immv(PG_FUNCTION_ARGS)
 {
 	text	*t_relname = PG_GETARG_TEXT_PP(0);
 	text	*t_sql = PG_GETARG_TEXT_PP(1);
-
 	char	*relname = text_to_cstring(t_relname);
 	char	*sql = text_to_cstring(t_sql);
 	List	*parsetree_list;
@@ -236,15 +235,14 @@ Datum
 refresh_immv(PG_FUNCTION_ARGS)
 {
 	text	*t_relname = PG_GETARG_TEXT_PP(0);
-	bool	skipData = PG_GETARG_BOOL(1);
+	bool	ispopulated = PG_GETARG_BOOL(1);
 	char	*relname = text_to_cstring(t_relname);
 	QueryCompletion qc;
 
-	ExecRefreshImmv( relname, skipData, &qc);
+	ExecRefreshImmv( relname, !(ispopulated), &qc);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }
-
 
 /*
  * Create triggers to prevent IMMV from being changed
@@ -263,7 +261,6 @@ CreateChangePreventTrigger(Oid matviewOid)
 	refaddr.classId = RelationRelationId;
 	refaddr.objectId = matviewOid;
 	refaddr.objectSubId = 0;
- 
 
 	ivm_trigger = makeNode(CreateTrigStmt);
 	ivm_trigger->relation = NULL;

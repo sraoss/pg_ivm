@@ -22,7 +22,7 @@
 #define Natts_pg_ivm_immv 3
 
 #define Anum_pg_ivm_immv_immvrelid 1
-#define Anum_pg_ivm_immv_withnodata 2
+#define Anum_pg_ivm_immv_ispopulated 2
 #define Anum_pg_ivm_immv_viewdef 3
 
 /* pg_ivm.c */
@@ -43,7 +43,6 @@ extern Query *rewriteQueryForIMMV(Query *query, List *colNames);
 /* matview.c */
 
 extern ObjectAddress ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc);
-//extern DestReceiver *CreateTransientRelDestReceiver(Oid oid);
 extern bool ImmvIncrementalMaintenanceIsEnabled(void);
 extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
 extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
