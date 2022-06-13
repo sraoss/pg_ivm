@@ -2,7 +2,7 @@
 
 The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL. 
 
-The extension is compatible with PostgreSQL 14.
+The extension is compatible with PostgreSQL 13 and 14.
 
 ## Description
 
