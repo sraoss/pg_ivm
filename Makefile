@@ -11,7 +11,7 @@ PGFILEDESC = "pg_ivm - incremental view maintenance on PostgreSQL"
 EXTENSION = pg_ivm
 DATA = pg_ivm--1.0.sql
 
-REGRESS = pg_ivm create_immv
+REGRESS = pg_ivm create_immv refresh_immv
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

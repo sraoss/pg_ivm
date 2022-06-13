@@ -1,0 +1,105 @@
+CREATE TABLE t (i int PRIMARY KEY);
+INSERT INTO t SELECT generate_series(1, 5);
+SELECT create_immv('mv', 'SELECT * FROM t');
+NOTICE:  created index "mv_index" on immv "mv"
+ create_immv 
+-------------
+           5
+(1 row)
+
+SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+ immvrelid | ispopulated 
+-----------+-------------
+ mv        | t
+(1 row)
+
+-- refresh immv without changing the ispopulated flag
+SELECT refresh_immv('mv', true);
+ refresh_immv 
+--------------
+            5
+(1 row)
+
+SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+ immvrelid | ispopulated 
+-----------+-------------
+ mv        | t
+(1 row)
+
+INSERT INTO t VALUES(6);
+SELECT i FROM mv ORDER BY 1;
+ i 
+---
+ 1
+ 2
+ 3
+ 4
+ 5
+ 6
+(6 rows)
+
+-- change ispopulated to False
+SELECT refresh_immv('mv', false);
+ refresh_immv 
+--------------
+            0
+(1 row)
+
+SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+ immvrelid | ispopulated 
+-----------+-------------
+ mv        | f
+(1 row)
+
+SELECT i FROM mv ORDER BY 1;
+ i 
+---
+(0 rows)
+
+-- immv remains empty
+INSERT INTO t VALUES(7);
+SELECT i FROM mv ORDER BY 1;
+ i 
+---
+(0 rows)
+
+-- chaneg ispopulated to True, immv is updated
+SELECT refresh_immv('mv', true);
+ refresh_immv 
+--------------
+            7
+(1 row)
+
+SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+ immvrelid | ispopulated 
+-----------+-------------
+ mv        | t
+(1 row)
+
+SELECT i FROM mv ORDER BY 1;
+ i 
+---
+ 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+(7 rows)
+
+-- immediate maintenance
+INSERT INTO t VALUES(8);
+SELECT i FROM mv ORDER BY 1;
+ i 
+---
+ 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+(8 rows)
+

@@ -69,7 +69,7 @@ static void check_ivm_restriction(Node *node);
 static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context);
 static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_create);
 
-static void StoreImmvQuery(Oid viewOid, Query *viewQuery);
+static void StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
 static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
@@ -232,7 +232,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	}
 
 	/* Create the "view" part of an IMMV. */
-	StoreImmvQuery(address.objectId, viewQuery);
+	StoreImmvQuery(address.objectId, !into->skipData, viewQuery);
 
 	if (is_matview)
 	{
@@ -975,7 +975,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
  * Store the query for the IMMV to pg_ivwm_immv
  */
 static void
-StoreImmvQuery(Oid viewOid, Query *viewQuery)
+StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery)
 {
 	char   *querytree = nodeToString((Node *) viewQuery);
 	Datum values[Natts_pg_ivm_immv];
@@ -989,6 +989,7 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
+	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(ispopulated);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
