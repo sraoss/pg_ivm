@@ -4,7 +4,6 @@ CREATE SCHEMA __pg_ivm__;
 
 CREATE TABLE __pg_ivm__.pg_ivm_immv(
   immvrelid regclass NOT NULL,
-  ispopulated bool NOT NULL,
   viewdef text NOT NULL,
 
   CONSTRAINT pg_ivm_immv_pkey PRIMARY KEY (immvrelid)
@@ -22,12 +21,6 @@ CREATE FUNCTION create_immv(text, text)
 RETURNS bigint 
 STRICT
 AS 'MODULE_PATHNAME', 'create_immv'
-LANGUAGE C;
-
-CREATE FUNCTION refresh_immv(text, bool)
-RETURNS bigint 
-STRICT
-AS 'MODULE_PATHNAME', 'refresh_immv'
 LANGUAGE C;
 
 -- trigger functions
