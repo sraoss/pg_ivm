@@ -50,8 +50,4 @@ extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(void);
 extern bool isIvmName(const char *s);
 
-extern Datum pg_get_viewdef(PG_FUNCTION_ARGS);
-
-
-
 #endif

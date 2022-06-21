@@ -387,7 +387,11 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 	 */
 	if (strcmp(aggname, "count") != 0)
 	{
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+#else
+		fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+#endif
 
 		/* Make a Func with a dummy arg, and then override this by the original agg's args. */
 		node = ParseFuncOrColumn(pstate, fn->funcname, list_make1(dmy_arg), NULL, fn, false, -1);
@@ -419,7 +423,11 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 			dmy_args = lappend(dmy_args, con);
 			ReleaseSysCache(type);
 		}
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		fn = makeFuncCall(list_make1(makeString("sum")), NIL, COERCE_EXPLICIT_CALL, -1);
+#else
+		fn = makeFuncCall(list_make1(makeString("sum")), NIL, -1);
+#endif
 
 		/* Make a Func with dummy args, and then override this by the original agg's args. */
 		node = ParseFuncOrColumn(pstate, fn->funcname, dmy_args, NULL, fn, false, -1);
@@ -847,6 +855,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 static bool
 check_aggregate_supports_ivm(Oid aggfnoid)
 {
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	switch (aggfnoid)
 	{
 		/* count */
@@ -877,6 +886,47 @@ check_aggregate_supports_ivm(Oid aggfnoid)
 		default:
 			return false;
 	}
+
+#else
+	char *funcs[] = {
+		/* count */
+		"count(\"any\")",
+		"count()",
+
+		/* sum */
+		"sum(int8)",
+		"sum(int4)",
+		"sum(int2)",
+		"sum(float4)",
+		"sum(float8)",
+		"sum(money)",
+		"sum(interval)",
+		"sum(numeric)",
+
+		/* avg */
+		"avg(int8)",
+		"avg(int4)",
+		"avg(int2)",
+		"avg(numeric)",
+		"avg(float4)",
+		"avg(float8)",
+		"avg(interval)",
+
+		NULL
+	};
+
+	char **fname = funcs;
+
+	while (*fname != NULL)
+	{
+		if (DatumGetObjectId(DirectFunctionCall1(to_regprocedure, CStringGetTextDatum(*fname))) == aggfnoid)
+			return true;
+		fname++;
+	}
+
+	return false;
+
+#endif
 }
 
 /*
