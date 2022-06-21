@@ -17,7 +17,7 @@ INSERT INTO mv_base_b VALUES
 -- CREATE INCREMENTAL MATERIALIZED VIEW mv_ivm_1 AS SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) WITH NO DATA;
 SELECT create_immv('mv_ivm_1', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i)');
 NOTICE:  could not create an index on immv "mv_ivm_1" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -83,7 +83,7 @@ CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
        AS 'SELECT 1' IMMUTABLE;
 SELECT create_immv('mv_ivm_func', 'SELECT * FROM ivm_func()');
 NOTICE:  could not create an index on immv "mv_ivm_func" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -92,7 +92,7 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
 
 SELECT create_immv('mv_ivm_no_tbl', 'SELECT 1');
 NOTICE:  could not create an index on immv "mv_ivm_no_tbl" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -104,7 +104,7 @@ ROLLBACK;
 BEGIN;
 SELECT create_immv('mv_ivm_duplicate', 'SELECT j FROM mv_base_a');
 NOTICE:  could not create an index on immv "mv_ivm_duplicate" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -162,9 +162,174 @@ SELECT * FROM mv_ivm_distinct ORDER BY 1;
 (5 rows)
 
 ROLLBACK;
--- not support SUM(), COUNT() and AVG() aggregate functions
+-- support SUM(), COUNT() and AVG() aggregate functions
+BEGIN;
 SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(i), AVG(j) FROM mv_base_a GROUP BY i');
-ERROR:  aggregate function is not supported on incrementally maintainable materialized view
+NOTICE:  created index "mv_ivm_agg_index" on immv "mv_ivm_agg"
+ create_immv 
+-------------
+           5
+(1 row)
+
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 | 10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 |  20 |     1 | 20.0000000000000000 |                 1 |                 1 |              20 |             1
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+INSERT INTO mv_base_a VALUES(2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 | 10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 | 120 |     2 | 60.0000000000000000 |                 2 |                 2 |             120 |             2
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+UPDATE mv_base_a SET j = 200 WHERE (i,j) = (2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+ i | sum | count |         avg          | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+----------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 |  10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 | 220 |     2 | 110.0000000000000000 |                 2 |                 2 |             220 |             2
+ 3 |  30 |     1 |  30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 |  40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 |  50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+DELETE FROM mv_base_a WHERE (i,j) = (2,200);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 | 10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 |  20 |     1 | 20.0000000000000000 |                 1 |                 1 |              20 |             1
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+ROLLBACK;
+-- support COUNT(*) aggregate function
+BEGIN;
+SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i');
+NOTICE:  created index "mv_ivm_agg_index" on immv "mv_ivm_agg"
+ create_immv 
+-------------
+           5
+(1 row)
+
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
+ i | sum | count | __ivm_count_sum__ | __ivm_count__ 
+---+-----+-------+-------------------+---------------
+ 1 |  10 |     1 |                 1 |             1
+ 2 |  20 |     1 |                 1 |             1
+ 3 |  30 |     1 |                 1 |             1
+ 4 |  40 |     1 |                 1 |             1
+ 5 |  50 |     1 |                 1 |             1
+(5 rows)
+
+INSERT INTO mv_base_a VALUES(2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
+ i | sum | count | __ivm_count_sum__ | __ivm_count__ 
+---+-----+-------+-------------------+---------------
+ 1 |  10 |     1 |                 1 |             1
+ 2 | 120 |     2 |                 2 |             2
+ 3 |  30 |     1 |                 1 |             1
+ 4 |  40 |     1 |                 1 |             1
+ 5 |  50 |     1 |                 1 |             1
+(5 rows)
+
+ROLLBACK;
+-- support aggregate functions without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_group',  'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
+NOTICE:  could not create an index on immv "mv_ivm_group" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           1
+(1 row)
+
+SELECT * FROM mv_ivm_group ORDER BY 1;
+ sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 150 |     5 | 30.0000000000000000 |                 5 |                 5 |             150 |             5
+(1 row)
+
+INSERT INTO mv_base_a VALUES(6,60);
+SELECT * FROM mv_ivm_group ORDER BY 1;
+ sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 210 |     6 | 35.0000000000000000 |                 6 |                 6 |             210 |             6
+(1 row)
+
+DELETE FROM mv_base_a;
+SELECT * FROM mv_ivm_group ORDER BY 1;
+ sum | count | avg | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+-----+-------+-----+-------------------+-------------------+-----------------+---------------
+     |     0 |     |                 0 |                 0 |                 |             0
+(1 row)
+
+ROLLBACK;
+-- resolved issue: When use AVG() function and values is indivisible, result of AVG() is incorrect.
+BEGIN;
+SELECT create_immv('mv_ivm_avg_bug', 'SELECT i, SUM(j), COUNT(j), AVG(j) FROM mv_base_A GROUP BY i');
+NOTICE:  created index "mv_ivm_avg_bug_index" on immv "mv_ivm_avg_bug"
+ create_immv 
+-------------
+           5
+(1 row)
+
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 | 10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 |  20 |     1 | 20.0000000000000000 |                 1 |                 1 |              20 |             1
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+INSERT INTO mv_base_a VALUES
+  (1,0),
+  (1,0),
+  (2,30),
+  (2,30);
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     3 |  3.3333333333333333 |                 3 |                 3 |              10 |             3
+ 2 |  80 |     3 | 26.6666666666666667 |                 3 |                 3 |              80 |             3
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+DELETE FROM mv_base_a WHERE (i,j) = (1,0);
+DELETE FROM mv_base_a WHERE (i,j) = (2,30);
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+ i | sum | count |         avg         | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
+---+-----+-------+---------------------+-------------------+-------------------+-----------------+---------------
+ 1 |  10 |     1 | 10.0000000000000000 |                 1 |                 1 |              10 |             1
+ 2 |  20 |     1 | 20.0000000000000000 |                 1 |                 1 |              20 |             1
+ 3 |  30 |     1 | 30.0000000000000000 |                 1 |                 1 |              30 |             1
+ 4 |  40 |     1 | 40.0000000000000000 |                 1 |                 1 |              40 |             1
+ 5 |  50 |     1 | 50.0000000000000000 |                 1 |                 1 |              50 |             1
+(5 rows)
+
+ROLLBACK;
+-- not support MIN(), MAX() aggregate functions
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
+ERROR:  aggregate function min(integer) is not supported on incrementally maintainable materialized view
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
+ERROR:  aggregate function max(integer) is not supported on incrementally maintainable materialized view
 -- support self join view and multiple change on the same table
 BEGIN;
 CREATE TABLE base_t (i int, v int);
@@ -172,7 +337,7 @@ INSERT INTO base_t VALUES (1, 10), (2, 20), (3, 30);
 SELECT create_immv('mv_self(v1, v2)',
  'SELECT t1.v, t2.v FROM base_t AS t1 JOIN base_t AS t2 ON t1.i = t2.i');
 NOTICE:  could not create an index on immv "mv_self" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -227,7 +392,7 @@ INSERT INTO base_r VALUES (1, 10), (2, 20), (3, 30);
 INSERT INTO base_s VALUES (1, 100), (2, 200), (3, 300);
 SELECT create_immv('mv(v1, v2)', 'SELECT r.v, s.v FROM base_r AS r JOIN base_s AS s USING(i)');;
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -301,7 +466,7 @@ CREATE TABLE base_t (i int, v int);
 INSERT INTO base_t VALUES (1,10),(2, NULL);
 SELECT create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -328,7 +493,7 @@ BEGIN;
 CREATE TABLE base_t (i int);
 SELECT create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -389,7 +554,7 @@ CREATE TABLE t_mytype (x mytype);
 SELECT create_immv('mv_mytype',
  'SELECT * FROM t_mytype');
 NOTICE:  could not create an index on immv "mv_mytype" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -434,6 +599,9 @@ ERROR:  ORDER BY clause is not supported on incrementally maintainable materiali
 -- contain HAVING
 SELECT create_immv('mv_ivm08', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) GROUP BY i,j,k HAVING SUM(i) > 5');
 ERROR:   HAVING clause is not supported on incrementally maintainable materialized view
+-- contain GROUP BY without aggregate
+SELECT create_immv('mv_ivm08', 'SELECT i,j FROM mv_base_a GROUP BY i,j');
+ERROR:  GROUP BY clause without aggregate is not supported on incrementally maintainable materialized view
 -- contain view or materialized view
 CREATE VIEW b_view AS SELECT i,k FROM mv_base_b;
 CREATE MATERIALIZED VIEW b_mview AS SELECT i,k FROM mv_base_b;
@@ -507,7 +675,7 @@ GRANT ALL on num_tbl TO PUBLIC;
 SET SESSION AUTHORIZATION ivm_user;
 SELECT create_immv('ivm_rls', 'SELECT * FROM rls_tbl');
 NOTICE:  could not create an index on immv "ivm_rls" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -532,7 +700,7 @@ SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 
 SELECT create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 NOTICE:  could not create an index on immv "ivm_rls2" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------

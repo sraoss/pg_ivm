@@ -22,8 +22,8 @@
 #define Natts_pg_ivm_immv 3
 
 #define Anum_pg_ivm_immv_immvrelid 1
-#define Anum_pg_ivm_immv_ispopulated 2
-#define Anum_pg_ivm_immv_viewdef 3
+#define Anum_pg_ivm_immv_viewdef 2
+#define Anum_pg_ivm_immv_ispopulated 3
 
 /* pg_ivm.c */
 
@@ -39,6 +39,7 @@ extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 extern void CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid, bool is_create);
 extern void CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create);
 extern Query *rewriteQueryForIMMV(Query *query, List *colNames);
+extern void makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *next_resno, List **aggs);
 
 /* matview.c */
 
@@ -48,6 +49,9 @@ extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
 extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(void);
 extern bool isIvmName(const char *s);
+
+extern Datum pg_get_viewdef(PG_FUNCTION_ARGS);
+
 
 
 #endif
