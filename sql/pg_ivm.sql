@@ -31,6 +31,17 @@ SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 ROLLBACK;
 SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 
+-- TRUNCATE a base table in join views
+BEGIN;
+TRUNCATE mv_base_a;
+SELECT * FROM mv_ivm_1;
+ROLLBACK;
+
+BEGIN;
+TRUNCATE mv_base_b;
+SELECT * FROM mv_ivm_1;
+ROLLBACK;
+
 -- some query syntax
 BEGIN;
 CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
@@ -71,6 +82,14 @@ INSERT INTO mv_base_a VALUES(2,100);
 SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
 ROLLBACK;
 
+-- TRUNCATE a base table in aggregate views
+BEGIN;
+SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i');
+TRUNCATE mv_base_a;
+SELECT sum, count FROM mv_ivm_agg;
+SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i;
+ROLLBACK;
+
 -- support aggregate functions without GROUP clause
 BEGIN;
 SELECT create_immv('mv_ivm_group',  'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
@@ -79,6 +98,14 @@ INSERT INTO mv_base_a VALUES(6,60);
 SELECT * FROM mv_ivm_group ORDER BY 1;
 DELETE FROM mv_base_a;
 SELECT * FROM mv_ivm_group ORDER BY 1;
+ROLLBACK;
+
+-- TRUNCATE a base table in aggregate views without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_group', 'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
+TRUNCATE mv_base_a;
+SELECT sum, count, avg FROM mv_ivm_group;
+SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a;
 ROLLBACK;
 
 -- resolved issue: When use AVG() function and values is indivisible, result of AVG() is incorrect.

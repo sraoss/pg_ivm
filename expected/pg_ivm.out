@@ -77,6 +77,23 @@ SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
  4 | 40 | 104
 (4 rows)
 
+-- TRUNCATE a base table in join views
+BEGIN;
+TRUNCATE mv_base_a;
+SELECT * FROM mv_ivm_1;
+ i | j | k 
+---+---+---
+(0 rows)
+
+ROLLBACK;
+BEGIN;
+TRUNCATE mv_base_b;
+SELECT * FROM mv_ivm_1;
+ i | j | k 
+---+---+---
+(0 rows)
+
+ROLLBACK;
 -- some query syntax
 BEGIN;
 CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
@@ -246,6 +263,27 @@ SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
 (5 rows)
 
 ROLLBACK;
+-- TRUNCATE a base table in aggregate views
+BEGIN;
+SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i');
+NOTICE:  created index "mv_ivm_agg_index" on immv "mv_ivm_agg"
+ create_immv 
+-------------
+           5
+(1 row)
+
+TRUNCATE mv_base_a;
+SELECT sum, count FROM mv_ivm_agg;
+ sum | count 
+-----+-------
+(0 rows)
+
+SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i;
+ i | sum | count 
+---+-----+-------
+(0 rows)
+
+ROLLBACK;
 -- support aggregate functions without GROUP clause
 BEGIN;
 SELECT create_immv('mv_ivm_group',  'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
@@ -275,6 +313,31 @@ SELECT * FROM mv_ivm_group ORDER BY 1;
  sum | count | avg | __ivm_count_sum__ | __ivm_count_avg__ | __ivm_sum_avg__ | __ivm_count__ 
 -----+-------+-----+-------------------+-------------------+-----------------+---------------
      |     0 |     |                 0 |                 0 |                 |             0
+(1 row)
+
+ROLLBACK;
+-- TRUNCATE a base table in aggregate views without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_group', 'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
+NOTICE:  could not create an index on immv "mv_ivm_group" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           1
+(1 row)
+
+TRUNCATE mv_base_a;
+SELECT sum, count, avg FROM mv_ivm_group;
+ sum | count | avg 
+-----+-------+-----
+     |     0 |    
+(1 row)
+
+SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a;
+ sum | count | avg 
+-----+-------+-----
+     |     0 |    
 (1 row)
 
 ROLLBACK;

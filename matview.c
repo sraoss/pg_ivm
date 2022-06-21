@@ -816,9 +816,6 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 
 	matviewRel = table_open(matviewOid, NoLock);
 
-	/* get view query*/
-	query = get_immv_query(matviewRel);
-
 	/* Make sure IMMV is a table. */
 	Assert(matviewRel->rd_rel->relkind == RELKIND_RELATION);
 
@@ -847,6 +844,72 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	SetUserIdAndSecContext(relowner,
 						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
 	save_nestlevel = NewGUCNestLevel();
+
+	/* get view query*/
+	query = get_immv_query(matviewRel);
+
+	/*
+	 * When a base table is truncated, the view content will be empty if the
+	 * view definition query does not contain an aggregate without a GROUP clause.
+	 * Therefore, such views can be truncated.
+	 *
+	 * Aggregate views without a GROUP clause always have one row. Therefore,
+	 * if a base table is truncated, the view will not be empty and will contain
+	 * a row with NULL value (or 0 for count()). So, in this case, we refresh the
+	 * view instead of truncating it.
+	 */
+	if (TRIGGER_FIRED_BY_TRUNCATE(trigdata->tg_event))
+	{
+		if (!(query->hasAggs && query->groupClause == NIL))
+		{
+			OpenImmvIncrementalMaintenance();
+			ExecuteTruncateGuts(list_make1(matviewRel), list_make1_oid(matviewOid),
+								NIL, DROP_RESTRICT, false);
+			CloseImmvIncrementalMaintenance();
+		}
+		else
+		{
+			Oid			OIDNewHeap;
+			DestReceiver *dest;
+			uint64		processed = 0;
+			Query	   *dataQuery = rewriteQueryForIMMV(query, NIL);
+			char		relpersistence = matviewRel->rd_rel->relpersistence;
+
+			/*
+			 * Create the transient table that will receive the regenerated data. Lock
+			 * it against access by any other process until commit (by which time it
+			 * will be gone).
+			 */
+			OIDNewHeap = make_new_heap(matviewOid, matviewRel->rd_rel->reltablespace,
+									   relpersistence,  ExclusiveLock);
+			LockRelationOid(OIDNewHeap, AccessExclusiveLock);
+			dest = CreateTransientRelDestReceiver(OIDNewHeap);
+
+			/* Generate the data */
+			processed = refresh_immv_datafill(dest, dataQuery, NULL, NULL, "");
+			refresh_by_heap_swap(matviewOid, OIDNewHeap, relpersistence);
+
+			/* Inform cumulative stats system about our activity */
+			pgstat_count_truncate(matviewRel);
+			pgstat_count_heap_insert(matviewRel, processed);
+		}
+
+		/* Clean up hash entry and delete tuplestores */
+		clean_up_IVM_hash_entry(entry);
+
+		/* Pop the original snapshot. */
+		PopActiveSnapshot();
+
+		table_close(matviewRel, NoLock);
+
+		/* Roll back any GUC changes */
+		AtEOXact_GUC(false, save_nestlevel);
+
+		/* Restore userid and security context */
+		SetUserIdAndSecContext(save_userid, save_sec_context);
+
+		return PointerGetDatum(NULL);
+	}
 
 	/*
 	 * rewrite query for calculating deltas
