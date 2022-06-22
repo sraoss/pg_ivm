@@ -130,12 +130,12 @@ parseNameAndColumns(const char *string, List **names, List **colNames)
 
 	if (!SplitIdentifierString(ptr, ',', &cols))
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-				 errmsg("invalid syntax name")));
+				(errcode(ERRCODE_INVALID_NAME),
+				 errmsg("invalid name syntax")));
 
 	if (list_length(cols) == 0)
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("must specify at least one column name")));
 
 	foreach(lc, cols)
