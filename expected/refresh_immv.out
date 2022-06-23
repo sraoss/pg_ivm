@@ -13,7 +13,7 @@ SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
  mv        | t
 (1 row)
 
--- refresh immv without changing the ispopulated flag
+-- Refresh IMMV with data
 SELECT refresh_immv('mv', true);
  refresh_immv 
 --------------
@@ -38,7 +38,7 @@ SELECT i FROM mv ORDER BY 1;
  6
 (6 rows)
 
--- change ispopulated to False
+-- Make IMMV unpopulated
 SELECT refresh_immv('mv', false);
  refresh_immv 
 --------------
@@ -56,14 +56,14 @@ SELECT i FROM mv ORDER BY 1;
 ---
 (0 rows)
 
--- immv remains empty
+-- Immediate maintenance is disabled. IMMV can be scannable and is empty.
 INSERT INTO t VALUES(7);
 SELECT i FROM mv ORDER BY 1;
  i 
 ---
 (0 rows)
 
--- chaneg ispopulated to True, immv is updated
+-- Refresh the IMMV and make it populated.
 SELECT refresh_immv('mv', true);
  refresh_immv 
 --------------
@@ -88,7 +88,7 @@ SELECT i FROM mv ORDER BY 1;
  7
 (7 rows)
 
--- immediate maintenance
+-- Immediate maintenance is enabled.
 INSERT INTO t VALUES(8);
 SELECT i FROM mv ORDER BY 1;
  i 
@@ -103,3 +103,16 @@ SELECT i FROM mv ORDER BY 1;
  8
 (8 rows)
 
+-- Use qualified name
+SELECT refresh_immv('public.mv', true);
+ refresh_immv 
+--------------
+            8
+(1 row)
+
+-- Use not existing IMMV
+SELECT refresh_immv('mv_not_existing', true);
+ERROR:  relation "mv_not_existing" does not exist
+-- Try to refresh a normal table -- error
+SELECT refresh_immv('t', true);
+ERROR:  "t" is not an IMMV

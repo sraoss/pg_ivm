@@ -202,7 +202,8 @@ PG_FUNCTION_INFO_V1(IVM_immediate_maintenance);
  * This imitates PostgreSQL's ExecRefreshMatView().
  */
 ObjectAddress
-ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
+ExecRefreshImmv(const RangeVar *relation, bool skipData,
+				const char *queryString, QueryCompletion *qc)
 {
 	Oid			matviewOid;
 	Relation	matviewRel;
@@ -220,6 +221,8 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 	int			save_sec_context;
 	int			save_nestlevel;
 	ObjectAddress address;
+	bool oldPopulated;
+
 	Relation pgIvmImmv;
 	TupleDesc tupdesc;
 	ScanKeyData key;
@@ -227,7 +230,6 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 	HeapTuple	tup;
 	bool isnull;
 	Datum datum;
-	bool oldSkipData;
 
 	/* Determine strength of lock needed. */
 	//concurrent = stmt->concurrent;
@@ -237,12 +239,9 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 	/*
 	 * Get a lock until end of transaction.
 	 */
-	matviewOid = RelnameGetRelid(relname);
-	if (!OidIsValid(matviewOid))
-	    ereport(ERROR,
-		    (errcode(ERRCODE_UNDEFINED_TABLE),
-		     errmsg("relation \"%s\" does not exist", relname)));
-
+	matviewOid = RangeVarGetRelidExtended(relation,
+										  lockmode, 0,
+										  RangeVarCallbackOwnsTable, NULL);
 	matviewRel = table_open(matviewOid, lockmode);
 	relowner = matviewRel->rd_rel->relowner;
 
@@ -256,6 +255,10 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
 	save_nestlevel = NewGUCNestLevel();
 
+	/*
+	 * Get the entry in pg_ivm_immv. If it doesn't exist, the relation
+	 * is not IMMV.
+	 */
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
 	tupdesc = RelationGetDescr(pgIvmImmv);
 	ScanKeyInit(&key,
@@ -266,16 +269,19 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 								  true, NULL, 1, &key);
 	tup = systable_getnext(scan);
 	if (!HeapTupleIsValid(tup))
-	{
-		elog(ERROR, "could not find tuple for immvrelid %s", relname);
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("\"%s\" is not an IMMV",
+						RelationGetRelationName(matviewRel))));
 
 	datum = heap_getattr(tup, Anum_pg_ivm_immv_ispopulated, tupdesc, &isnull);
 	Assert(!isnull);
-	oldSkipData = !DatumGetBool(datum);
+	oldPopulated = DatumGetBool(datum);
 
-	/* update pg_ivm_immv view */
-	if (skipData != oldSkipData)
+	/* Tentatively mark the IMMV as populated or not (this will roll back
+	 * if we fail later).
+	 */
+	if (skipData != (!oldPopulated))
 	{
 		Datum values[Natts_pg_ivm_immv];
 		bool nulls[Natts_pg_ivm_immv];
@@ -290,8 +296,14 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 
 		newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
 
-   		CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+		CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
 		heap_freetuple(newtup);
+
+		/*
+		 * Advance command counter to make the updated pg_ivm_immv row locally
+		 * visible.
+		 */
+		CommandCounterIncrement();
 	}
 
 	systable_endscan(scan);
@@ -395,7 +407,7 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 
 	/* Generate the data, if wanted. */
 	if (!skipData)
-		processed = refresh_immv_datafill(dest, dataQuery, NULL, NULL, "");
+		processed = refresh_immv_datafill(dest, dataQuery, NULL, NULL, queryString);
 
 	/* Make the matview match the newly generated data. */
 	refresh_by_heap_swap(matviewOid, OIDNewHeap, relpersistence);
@@ -410,9 +422,10 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 	if (!skipData)
 		pgstat_count_heap_insert(matviewRel, processed);
 
-	if (!skipData && oldSkipData)
+	if (!skipData && !oldPopulated)
 	{
 		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid, true);
+		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid, false);
 	}
 
 	table_close(matviewRel, NoLock);
@@ -434,7 +447,7 @@ ExecRefreshImmv(const char *relname, bool skipData, QueryCompletion *qc)
 	 * completion tag output might break applications using it.
 	 */
 	if (qc)
-		SetQueryCompletion(qc, CMDTAG_SELECT, processed);
+		SetQueryCompletion(qc, CMDTAG_REFRESH_MATERIALIZED_VIEW, processed);
 
 	return address;
 }

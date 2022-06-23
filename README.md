@@ -1,6 +1,6 @@
 # pg_ivm
 
-The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL. 
+The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL.
 
 The extension is compatible with PostgreSQL 13 and 14.
 
@@ -22,7 +22,7 @@ creates an IMMV with name 'myview' defined as 'SELECT * FROM mytab'. This is cor
 CREATE MATERIALIZED VIEW myview AS SELECT * FROM mytab;
 ```
 
-When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. 
+When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified.
 
 ```sql
 postgres=# SELECT create_immv('m', 'SELECT * FROM t0');
@@ -99,7 +99,7 @@ refresh_immv(immv_name text, with_data bool) RETURNS bigint
 
 `refresh_immv` completely replaces the contents of an IMMV as `REFRESH MATERIALIZED VIEW` command does for a materialized view. To execute this function you must be the owner of the IMMV.  The old contents are discarded.
 
-The with_data flag is corresponding to `WITH [NO] DATA` option of REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
+The with_data flag is corresponding to `WITH [NO] DATA` option of REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
 
 
 ### IMMV metadata catalog
@@ -194,7 +194,7 @@ Logical replication is not supported, that is, even when a base table at a publi
 
 ### Aggregates
 
-Supported aggregate functions are `count`, `sum`, and `avg`. `min` or `max` is not supported. Currently, only built-in aggregate functions are supported and user defined aggregates cannot be used. 
+Supported aggregate functions are `count`, `sum`, and `avg`. `min` or `max` is not supported. Currently, only built-in aggregate functions are supported and user defined aggregates cannot be used.
 
 When an IMMV including aggregate is created, some extra columns whose name start with `__ivm` are automatically added to the target list. `__ivm_count__` contains the number of tuples aggregated in each group. In addition, more than one extra columns for each column of aggregated value  are added in order to maintain the value. For example, columns named like  `__ivm_count_avg__` and `__ivm_sum_avg__` are added for maintaining an average value. When a base table is modified, the new aggregated values are incrementally calculated using the old aggregated values and values of related extra  columns stored in the IMMV.
 
@@ -226,7 +226,7 @@ If some base tables have row level security policy, rows that are not visible to
 
 ### How to Disable or Enable Immediate Maintenance
 
-IVM is effective when we want to keep an IMMV up-to-date and small fraction of a base table is modified infrequently.  Due to the overhead of immediate maintenance, IVM is not effective when a base table is modified frequently.  Also, when a large part of a base table is modified or large data is inserted into a base table, IVM is not effective and the cost of maintenance can be larger than refresh from scratch. 
+IVM is effective when we want to keep an IMMV up-to-date and small fraction of a base table is modified infrequently.  Due to the overhead of immediate maintenance, IVM is not effective when a base table is modified frequently.  Also, when a large part of a base table is modified or large data is inserted into a base table, IVM is not effective and the cost of maintenance can be larger than refresh from scratch.
 
 In such situation, we can use `refesh_immv` function with `with_data = falase` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
 

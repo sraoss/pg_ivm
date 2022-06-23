@@ -149,7 +149,7 @@ end:
 }
 
 /*
- * User inerface for creating an IMMV
+ * User interface for creating an IMMV
  */
 Datum
 create_immv(PG_FUNCTION_ARGS)
@@ -211,6 +211,28 @@ create_immv(PG_FUNCTION_ARGS)
 }
 
 /*
+ * User interface for refreshing an IMMV
+ */
+Datum
+refresh_immv(PG_FUNCTION_ARGS)
+{
+	text	*t_relname = PG_GETARG_TEXT_PP(0);
+	bool	ispopulated = PG_GETARG_BOOL(1);
+	char    *relname = text_to_cstring(t_relname);
+	QueryCompletion qc;
+	StringInfoData command_buf;
+
+	initStringInfo(&command_buf);
+	appendStringInfo(&command_buf, "SELECT refresh_immv('%s, %s);",
+					 relname, ispopulated ? "true" : "false");
+
+	ExecRefreshImmv(makeRangeVarFromNameList(textToQualifiedNameList(t_relname)),
+					!ispopulated, command_buf.data, &qc);
+
+	PG_RETURN_INT64(qc.nprocessed);
+}
+
+/*
  * Trigger function to prevent IMMV from being changed
  */
 Datum
@@ -226,22 +248,6 @@ IVM_prevent_immv_change(PG_FUNCTION_ARGS)
 						RelationGetRelationName(rel))));
 
 	return PointerGetDatum(NULL);
-}
-
-/*
- * User inerface for refreshing an IMMV
- */
-Datum
-refresh_immv(PG_FUNCTION_ARGS)
-{
-	text	*t_relname = PG_GETARG_TEXT_PP(0);
-	bool	ispopulated = PG_GETARG_BOOL(1);
-	char	*relname = text_to_cstring(t_relname);
-	QueryCompletion qc;
-
-	ExecRefreshImmv( relname, !(ispopulated), &qc);
-
-	PG_RETURN_INT64(qc.nprocessed);
 }
 
 /*
