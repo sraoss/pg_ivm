@@ -44,6 +44,7 @@ static void parseNameAndColumns(const char *string, List **names, List **colName
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(create_immv);
+PG_FUNCTION_INFO_V1(refresh_immv);
 PG_FUNCTION_INFO_V1(IVM_prevent_immv_change);
 
 /*
@@ -129,12 +130,12 @@ parseNameAndColumns(const char *string, List **names, List **colNames)
 
 	if (!SplitIdentifierString(ptr, ',', &cols))
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-				 errmsg("invalid syntax name")));
+				(errcode(ERRCODE_INVALID_NAME),
+				 errmsg("invalid name syntax")));
 
 	if (list_length(cols) == 0)
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("must specify at least one column name")));
 
 	foreach(lc, cols)
@@ -148,7 +149,7 @@ end:
 }
 
 /*
- * User inerface for creating an IMMV
+ * User interface for creating an IMMV
  */
 Datum
 create_immv(PG_FUNCTION_ARGS)
@@ -185,7 +186,11 @@ create_immv(PG_FUNCTION_ARGS)
 
 	ctas = makeNode(CreateTableAsStmt);
 	ctas->query = parsetree->stmt;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	ctas->objtype = OBJECT_MATVIEW;
+#else
+	ctas->relkind = OBJECT_MATVIEW;
+#endif
 	ctas->is_select_into = false;
 	ctas->into = makeNode(IntoClause);
 	ctas->into->rel = makeRangeVarFromNameList(names);
@@ -201,6 +206,28 @@ create_immv(PG_FUNCTION_ARGS)
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
 	ExecCreateImmv(pstate, (CreateTableAsStmt *)query->utilityStmt, NULL, NULL, &qc);
+
+	PG_RETURN_INT64(qc.nprocessed);
+}
+
+/*
+ * User interface for refreshing an IMMV
+ */
+Datum
+refresh_immv(PG_FUNCTION_ARGS)
+{
+	text	*t_relname = PG_GETARG_TEXT_PP(0);
+	bool	ispopulated = PG_GETARG_BOOL(1);
+	char    *relname = text_to_cstring(t_relname);
+	QueryCompletion qc;
+	StringInfoData command_buf;
+
+	initStringInfo(&command_buf);
+	appendStringInfo(&command_buf, "SELECT refresh_immv('%s, %s);",
+					 relname, ispopulated ? "true" : "false");
+
+	ExecRefreshImmv(makeRangeVarFromNameList(textToQualifiedNameList(t_relname)),
+					!ispopulated, command_buf.data, &qc);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }
@@ -223,7 +250,6 @@ IVM_prevent_immv_change(PG_FUNCTION_ARGS)
 	return PointerGetDatum(NULL);
 }
 
-
 /*
  * Create triggers to prevent IMMV from being changed
  */
@@ -241,7 +267,6 @@ CreateChangePreventTrigger(Oid matviewOid)
 	refaddr.classId = RelationRelationId;
 	refaddr.objectId = matviewOid;
 	refaddr.objectSubId = 0;
-
 
 	ivm_trigger = makeNode(CreateTrigStmt);
 	ivm_trigger->relation = NULL;

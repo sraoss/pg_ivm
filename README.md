@@ -1,8 +1,8 @@
 # pg_ivm
 
-The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL. 
+The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL.
 
-The extension is compatible with PostgreSQL 14.
+The extension is compatible with PostgreSQL 13 and 14.
 
 ## Description
 
@@ -22,7 +22,7 @@ creates an IMMV with name 'myview' defined as `SELECT * FROM mytab`. This is cor
 CREATE MATERIALIZED VIEW myview AS SELECT * FROM mytab;
 ```
 
-When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. 
+When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified.
 
 ```sql
 postgres=# SELECT create_immv('m', 'SELECT * FROM t0');
@@ -63,7 +63,7 @@ make install
 
 If you installed PostgreSQL from rpm or deb, you will need the devel package (for example, postgresql14-devel or postgresql-server-dev-14).
 
-> **Important:** Don't forget to set the `PG_CONFIG` variable (`make PG_CONFIG=...`) in case you want to test `pg_ivm` on a non-default or custom build of PostgreSQL. Read more [here](https://wiki.postgresql.org/wiki/Building_and_Installing_PostgreSQL_Extension_Modules).
+> **Important:** Don't forget to set the `PG_CONFIG` variable (`make PG_CONFIG=...`) or the `PATH` to the `pg_config` command in case you want to use `pg_ivm` on a non-default or custom build of PostgreSQL. Read more [here](https://wiki.postgresql.org/wiki/Building_and_Installing_PostgreSQL_Extension_Modules).
 
 And, execute CREATE EXTENSION comand.
 
@@ -78,15 +78,29 @@ RPM packages of pg_ivm are available from the [PostgreSQL yum repository](https:
 
 When `pg_ivm` is installed, the following objects are created.
 
-### IMMV creation function
+### Functions
+
+#### create_imm
 
 Use `create_immv` function to create IMMV.
 ```
 create_immv(immv_name text, view_definition text) RETURNS bigint
 ```
-`create_immv` defined a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
+`create_immv` defines a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
-When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes. Or, if the view has DISTINCT clause, a unique index is created on all columns in the target list. In other cases, no index is created.
+When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes.  In other cases, no index is created.
+
+#### refresh_imm
+
+Use `refresh_immv` function to refresh IMMV.
+```
+refresh_immv(immv_name text, with_data bool) RETURNS bigint
+```
+
+`refresh_immv` completely replaces the contents of an IMMV as `REFRESH MATERIALIZED VIEW` command does for a materialized view. To execute this function you must be the owner of the IMMV.  The old contents are discarded.
+
+The with_data flag is corresponding to `WITH [NO] DATA` option of REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
+
 
 ### IMMV metadata catalog
 
@@ -96,6 +110,7 @@ The catalog `pg_ivm_immv` stores IMMV information.
 |:---|:---|:---|
 |immvrelid|regclass|The OID of the IMMV|
 |viewdef|text|Query tree (in the form of a nodeToString() representation) for the view definition|
+|ispopulated|bool|True if IMMV is currently populated|
 
 
 ## Example
@@ -152,7 +167,7 @@ test=# SELECT * FROM immv WHERE aid = 1;
 
 An appropriate index on IMMV is necessary for efficient IVM because we need to looks for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
 
-Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible.  If the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. In other cases, no index is created.
+Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible. If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes.  In other cases, no index is created.
 
 In the previous example, a unique index "immv_index" is created on aid and bid columns of "immv", and this enables the rapid update of the view. Dropping this index make updating the view take a loger time.
 
@@ -167,17 +182,28 @@ Time: 3224.741 ms (00:03.225)
 
 ## Supported View Definitions and Restriction
 
-Currently, IMMV's view definition can contain inner joins, and DISTINCT clause. Inner joins including self-join are supported, but outer joins are not supported. Aggregates, sub-queries, CTEs, window functions, LIMIT/OFFSET, UNION/INTERSECT/EXCEPT, DISTINCT ON, TABLESAMPLE, VALUES, and FOR UPDATE/SHARE can not be used in view definition.
+Currently, IMMV's view definition can contain inner joins, DISTINCT clause, and some built-in aggregate functions. Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, and avg. Other aggregates including min and max, sub-queries, CTEs, window functions, HAVING, LIMIT/OFFSET, UNION/INTERSECT/EXCEPT, DISTINCT ON, TABLESAMPLE, VALUES, and FOR UPDATE/SHARE can not be used in view definition.
 
-The base tables must be simple. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
+The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
 The targetlist cannot contain system columns, columns whose name starts with `__ivm_`.
 
 Logical replication is not supported, that is, even when a base table at a publisher node is modified, IMMVs at subscriber nodes defined on these base tables are not updated.
 
-When the `TRUNCATE` command is executed on a base table, nothing is changed on the IMMV.
-
 ## Notes
+
+### Aggregates
+
+Supported aggregate functions are `count`, `sum`, and `avg`. `min` or `max` is not supported. Currently, only built-in aggregate functions are supported and user defined aggregates cannot be used.
+
+When an IMMV including aggregate is created, some extra columns whose name start with `__ivm` are automatically added to the target list. `__ivm_count__` contains the number of tuples aggregated in each group. In addition, more than one extra columns for each column of aggregated value  are added in order to maintain the value. For example, columns named like  `__ivm_count_avg__` and `__ivm_sum_avg__` are added for maintaining an average value. When a base table is modified, the new aggregated values are incrementally calculated using the old aggregated values and values of related extra  columns stored in the IMMV.
+
+Note that using `sum` or `avg` on `real` (`float4`) type or `double precision` (`float8`) type in IMMV is unsafe, because aggregated values in IMMV can become different from results calculated from base tables due to the limited precision of these types. To avoid this problem, use the `numeric` type instead.
+
+#### Restrictions on Aggregate
+
+If we have a `GROUP BY` clause, expressions specified in `GROUP BY` must appear in the target list.  This is how tuples to be updated in the IMMV are identified. These attributes are used as scan keys for searching tuples in the IMMV, so indexes on them are required for efficient
+IVM.
 
 ### DISTINCT
 
@@ -185,13 +211,24 @@ When the `TRUNCATE` command is executed on a base table, nothing is changed on t
 
 Physically, an IMMV defined with `DISTINCT` contains tuples after eliminating duplicates, and the multiplicity of each tuple is stored in a extra column named `__ivm_count__` that is added when such IMMV is created.
 
+### TRUNCATE
+
+When a base table is truncated, the IMMV is also truncated and the contents become empty if the view definition query does not contain an aggregate without a `GROUP BY` clause. Aggregate views without a `GROUP BY` clause always have one row. Therefore, in such cases, if a base table is truncated, the IMMV is simply refreshed instead of being truncated.
+
+
 ### Concurrent Transactions
 
-Suppose an IMMV is defined on two base tables and each table was modified in different a concurrent transaction simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change which happened in this transaction. On the other hand, in order to update the IMMV correctly in the transaction which was committed later, we need to know the changes occurred in both transactions.  For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` mode to make sure that the IMMV is updated in the latter transaction after the former transaction is committed.  In `REPEATABLE READ` or `SERIALIZABLE` mode, an error is raised immediately if lock acquisition fails because any changes which occurred in other transactions are not be visible in these modes and IMMV cannot be updated correctly in such situations. However, as an exception if the IMMV has only one base table, the lock held on the IMMV is `RowExclusiveLock`.
+Suppose an IMMV is defined on two base tables and each table was modified in different a concurrent transaction simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change which happened in this transaction. On the other hand, in order to update the IMMV correctly in the transaction which was committed later, we need to know the changes occurred in both transactions.  For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` mode to make sure that the IMMV is updated in the latter transaction after the former transaction is committed.  In `REPEATABLE READ` or `SERIALIZABLE` mode, an error is raised immediately if lock acquisition fails because any changes which occurred in other transactions are not be visible in these modes and IMMV cannot be updated correctly in such situations. However, as an exception if the IMMV has only one base table and doesn't use DISTINCT or GROUP BY, the lock held on the IMMV is `RowExclusiveLock`.
 
 ### Row Level Security
 
 If some base tables have row level security policy, rows that are not visible to the materialized view's owner are excluded from the result.  In addition, such rows are excluded as well when views are incrementally maintained.  However, if a new policy is defined or policies are changed after the materialized view was created, the new policy will not be applied to the view contents.  To apply the new policy, you need to recreate IMMV.
+
+### How to Disable or Enable Immediate Maintenance
+
+IVM is effective when we want to keep an IMMV up-to-date and small fraction of a base table is modified infrequently.  Due to the overhead of immediate maintenance, IVM is not effective when a base table is modified frequently.  Also, when a large part of a base table is modified or large data is inserted into a base table, IVM is not effective and the cost of maintenance can be larger than refresh from scratch.
+
+In such situation, we can use `refesh_immv` function with `with_data = falase` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
 
 ## Authors
 IVM Development Group

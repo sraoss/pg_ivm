@@ -1,4 +1,5 @@
 CREATE EXTENSION pg_ivm;
+GRANT ALL ON SCHEMA public TO public;
 
 -- create a table to use as a basis for views and materialized views in various combinations
 CREATE TABLE mv_base_a (i int, j int);
@@ -30,6 +31,17 @@ SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 ROLLBACK;
 SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 
+-- TRUNCATE a base table in join views
+BEGIN;
+TRUNCATE mv_base_a;
+SELECT * FROM mv_ivm_1;
+ROLLBACK;
+
+BEGIN;
+TRUNCATE mv_base_b;
+SELECT * FROM mv_ivm_1;
+ROLLBACK;
+
 -- some query syntax
 BEGIN;
 CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
@@ -50,8 +62,70 @@ SELECT * FROM mv_ivm_duplicate ORDER BY 1;
 SELECT * FROM mv_ivm_distinct ORDER BY 1;
 ROLLBACK;
 
--- not support SUM(), COUNT() and AVG() aggregate functions
+-- support SUM(), COUNT() and AVG() aggregate functions
+BEGIN;
 SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(i), AVG(j) FROM mv_base_a GROUP BY i');
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+INSERT INTO mv_base_a VALUES(2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+UPDATE mv_base_a SET j = 200 WHERE (i,j) = (2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+DELETE FROM mv_base_a WHERE (i,j) = (2,200);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3,4;
+ROLLBACK;
+
+-- support COUNT(*) aggregate function
+BEGIN;
+SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i');
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
+INSERT INTO mv_base_a VALUES(2,100);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2,3;
+ROLLBACK;
+
+-- TRUNCATE a base table in aggregate views
+BEGIN;
+SELECT create_immv('mv_ivm_agg', 'SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i');
+TRUNCATE mv_base_a;
+SELECT sum, count FROM mv_ivm_agg;
+SELECT i, SUM(j), COUNT(*) FROM mv_base_a GROUP BY i;
+ROLLBACK;
+
+-- support aggregate functions without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_group',  'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
+SELECT * FROM mv_ivm_group ORDER BY 1;
+INSERT INTO mv_base_a VALUES(6,60);
+SELECT * FROM mv_ivm_group ORDER BY 1;
+DELETE FROM mv_base_a;
+SELECT * FROM mv_ivm_group ORDER BY 1;
+ROLLBACK;
+
+-- TRUNCATE a base table in aggregate views without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_group', 'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
+TRUNCATE mv_base_a;
+SELECT sum, count, avg FROM mv_ivm_group;
+SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a;
+ROLLBACK;
+
+-- resolved issue: When use AVG() function and values is indivisible, result of AVG() is incorrect.
+BEGIN;
+SELECT create_immv('mv_ivm_avg_bug', 'SELECT i, SUM(j), COUNT(j), AVG(j) FROM mv_base_A GROUP BY i');
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+INSERT INTO mv_base_a VALUES
+  (1,0),
+  (1,0),
+  (2,30),
+  (2,30);
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+DELETE FROM mv_base_a WHERE (i,j) = (1,0);
+DELETE FROM mv_base_a WHERE (i,j) = (2,30);
+SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
+ROLLBACK;
+
+-- not support MIN(), MAX() aggregate functions
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
 
 -- support self join view and multiple change on the same table
 BEGIN;
@@ -190,6 +264,8 @@ SELECT create_immv('mv_ivm05', 'SELECT i,j, (SELECT k FROM mv_base_b b WHERE a.i
 SELECT create_immv('mv_ivm07', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) ORDER BY i,j,k');
 -- contain HAVING
 SELECT create_immv('mv_ivm08', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) GROUP BY i,j,k HAVING SUM(i) > 5');
+-- contain GROUP BY without aggregate
+SELECT create_immv('mv_ivm08', 'SELECT i,j FROM mv_base_a GROUP BY i,j');
 
 -- contain view or materialized view
 CREATE VIEW b_view AS SELECT i,k FROM mv_base_b;
