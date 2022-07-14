@@ -400,8 +400,13 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	 * it against access by any other process until commit (by which time it
 	 * will be gone).
 	 */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 150000)
+	OIDNewHeap = make_new_heap(matviewOid, tableSpace,
+							   matviewRel->rd_rel->relam, relpersistence, ExclusiveLock);
+#else
 	OIDNewHeap = make_new_heap(matviewOid, tableSpace,
 							   relpersistence, ExclusiveLock);
+#endif
 	LockRelationOid(OIDNewHeap, AccessExclusiveLock);
 	dest = CreateTransientRelDestReceiver(OIDNewHeap);
 
@@ -893,8 +898,13 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 			 * it against access by any other process until commit (by which time it
 			 * will be gone).
 			 */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 150000)
+			OIDNewHeap = make_new_heap(matviewOid, matviewRel->rd_rel->reltablespace,
+									   matviewRel->rd_rel->relam, relpersistence,  ExclusiveLock);
+#else
 			OIDNewHeap = make_new_heap(matviewOid, matviewRel->rd_rel->reltablespace,
 									   relpersistence,  ExclusiveLock);
+#endif
 			LockRelationOid(OIDNewHeap, AccessExclusiveLock);
 			dest = CreateTransientRelDestReceiver(OIDNewHeap);
 
