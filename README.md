@@ -150,7 +150,7 @@ test=# SELECT * FROM immv WHERE aid = 1;
 (1 row)
 ```
 
-An appropriate indexe on IMMV is necessary for efficient IVM because we need to looks for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
+An appropriate index on IMMV is necessary for efficient IVM because we need to looks for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
 
 Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible.  If the IMMV contains all primary key attritubes of its base tables in the target list, a unique index is created on these attritubes. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. In other cases, no index is created.
 
@@ -167,7 +167,7 @@ Time: 3224.741 ms (00:03.225)
 
 ## Supported View Definitions and Restriction
 
-Currently, IMMV's view definition can contain inner joins, and DISTINCT clause. Inner joins including self-join are supported, but outer joins are not supported. Aggregates, sub-quereis, CTEs, window functions, LIMIT/OFFSET, UNION/INTERSECT/EXCEPT, DISTINCT ON, TABLEAMPLE, VALUES, and FOR UPDATE/SHARE can not be used in view definition.
+Currently, IMMV's view definition can contain inner joins, and DISTINCT clause. Inner joins including self-join are supported, but outer joins are not supported. Aggregates, sub-queries, CTEs, window functions, LIMIT/OFFSET, UNION/INTERSECT/EXCEPT, DISTINCT ON, TABLESAMPLE, VALUES, and FOR UPDATE/SHARE can not be used in view definition.
 
 The base tables must be simple. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
