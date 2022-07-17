@@ -127,6 +127,18 @@ ROLLBACK;
 SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
 SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
 
+-- support subquery in WHERE clause
+BEGIN;
+SELECT create_immv('mv_ivm_subquery01', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
+SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
+INSERT INTO mv_base_b VALUES(5,105);
+SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
+UPDATE mv_base_a SET j = 0 WHERE i = 1;
+SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
+DELETE FROM mv_base_b WHERE (i,k) = (5,105);
+SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
+ROLLBACK;
+
 -- support self join view and multiple change on the same table
 BEGIN;
 CREATE TABLE base_t (i int, v int);
@@ -258,7 +270,7 @@ SELECT create_immv('mv_ivm04', 'SELECT i,j,xidsend(xmin) AS x_min FROM mv_base_a
 
 -- contain subquery
 SELECT create_immv('mv_ivm03', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
-SELECT create_immv('mv_ivm04', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
+SELECT create_immv('mv_ivm04', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
 SELECT create_immv('mv_ivm05', 'SELECT i,j, (SELECT k FROM mv_base_b b WHERE a.i = b.i) FROM mv_base_a a');
 -- contain ORDER BY
 SELECT create_immv('mv_ivm07', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) ORDER BY i,j,k');
