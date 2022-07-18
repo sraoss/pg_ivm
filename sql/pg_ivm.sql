@@ -127,7 +127,7 @@ ROLLBACK;
 SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
 SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
 
--- support subquery in WHERE clause
+-- support subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery01', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
 SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;

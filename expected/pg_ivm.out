@@ -393,7 +393,7 @@ SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY 
 ERROR:  aggregate function min(integer) is not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
 ERROR:  aggregate function max(integer) is not supported on incrementally maintainable materialized view
--- support subquery in WHERE clause
+-- support subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery01', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
 NOTICE:  could not create an index on immv "mv_ivm_subquery01" automatically
