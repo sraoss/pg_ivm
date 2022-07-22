@@ -111,7 +111,7 @@ typedef struct MV_TriggerTable
 	List   *old_rtes;			/* RTEs of ENRs for old_tuplestores*/
 	List   *new_rtes;			/* RTEs of ENRs for new_tuplestores */
 
-	List   *rte_indexes;		/* List of RTE index of the modified table */
+	List   *rte_paths;			/* List of paths to RTE index of the modified table */
 	RangeTblEntry *original_rte;	/* the original RTE saved before rewriting query */
 } MV_TriggerTable;
 
@@ -143,7 +143,7 @@ static Query *get_immv_query(Relation matviewRel);
 
 static Query *rewrite_query_for_preupdate_state(Query *query, List *tables,
 								  TransactionId xid, CommandId cid,
-								  ParseState *pstate);
+								  ParseState *pstate, List *rte_path);
 static void register_delta_ENRs(ParseState *pstate, Query *query, List *tables);
 static char *make_delta_enr_name(const char *prefix, Oid relid, int count);
 static RangeTblEntry *get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
@@ -153,11 +153,12 @@ static RangeTblEntry *union_ENRs(RangeTblEntry *rte, Oid relid, List *enr_rtes, 
 		   QueryEnvironment *queryEnv);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
-static void calc_delta(MV_TriggerTable *table, int rte_index, Query *query,
+static void calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 			DestReceiver *dest_old, DestReceiver *dest_new,
 			TupleDesc *tupdesc_old, TupleDesc *tupdesc_new,
 			QueryEnvironment *queryEnv);
-static Query *rewrite_query_for_postupdate_state(Query *query, MV_TriggerTable *table, int rte_index);
+static Query *rewrite_query_for_postupdate_state(Query *query, MV_TriggerTable *table, List *rte_path);
+static ListCell *getRteListCell(Query *query, List *rte_path);
 
 static void apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *new_tuplestores,
 			TupleDesc tupdesc_old, TupleDesc tupdesc_new,
@@ -795,7 +796,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		table->new_tuplestores = NIL;
 		table->old_rtes = NIL;
 		table->new_rtes = NIL;
-		table->rte_indexes = NIL;
+		table->rte_paths = NIL;
 		entry->tables = lappend(entry->tables, table);
 
 		MemoryContextSwitchTo(oldcxt);
@@ -955,7 +956,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	/* Set all tables in the query to pre-update state */
 	rewritten = rewrite_query_for_preupdate_state(rewritten, entry->tables,
 												  entry->xid, entry->cid,
-												  pstate);
+												  pstate, NIL);
 	/* Rewrite for DISTINCT clause and aggregates functions */
 	rewritten = rewrite_query_for_distinct_and_aggregates(rewritten, pstate);
 
@@ -1011,9 +1012,9 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		table = (MV_TriggerTable *) lfirst(lc);
 
 		/* loop for self-join */
-		foreach(lc2, table->rte_indexes)
+		foreach(lc2, table->rte_paths)
 		{
-			int	rte_index = lfirst_int(lc2);
+			List	*rte_path = lfirst(lc2);
 			TupleDesc		tupdesc_old;
 			TupleDesc		tupdesc_new;
 			bool	use_count = false;
@@ -1025,11 +1026,11 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 				use_count = true;
 
 			/* calculate delta tables */
-			calc_delta(table, rte_index, rewritten, dest_old, dest_new,
+			calc_delta(table, rte_path, rewritten, dest_old, dest_new,
 					   &tupdesc_old, &tupdesc_new, queryEnv);
 
 			/* Set the table in the query to post-update state */
-			rewritten = rewrite_query_for_postupdate_state(rewritten, table, rte_index);
+			rewritten = rewrite_query_for_postupdate_state(rewritten, table, rte_path);
 
 			PG_TRY();
 			{
@@ -1091,15 +1092,18 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 static Query*
 rewrite_query_for_preupdate_state(Query *query, List *tables,
 								  TransactionId xid, CommandId cid,
-								  ParseState *pstate)
+								  ParseState *pstate, List *rte_path)
 {
 	ListCell *lc;
 	int num_rte = list_length(query->rtable);
 	int i;
 
+	/* This can recurse, so check for excessive recursion */
+	check_stack_depth();
 
-	/* register delta ENRs */
-	register_delta_ENRs(pstate, query, tables);
+	/* register delta ENRs only one at first call */
+	if (rte_path == NIL)
+		register_delta_ENRs(pstate, query, tables);
 
 	/* XXX: Is necessary? Is this right timing? */
 	AcquireRewriteLocks(query, true, false);
@@ -1109,19 +1113,25 @@ rewrite_query_for_preupdate_state(Query *query, List *tables,
 	{
 		RangeTblEntry *r = (RangeTblEntry*) lfirst(lc);
 
-		ListCell *lc2;
-		foreach(lc2, tables)
+		/* if rte contains subquery, search recursively */
+		if (r->rtekind == RTE_SUBQUERY)
+			rewrite_query_for_preupdate_state(r->subquery, tables, xid, cid, pstate, lappend_int(list_copy(rte_path), i));
+		else
 		{
-			MV_TriggerTable *table = (MV_TriggerTable *) lfirst(lc2);
-			/*
-			 * if the modified table is found then replace the original RTE with
-			 * "pre-state" RTE and append its index to the list.
-			 */
-			if (r->relid == table->table_id)
+			ListCell *lc2;
+			foreach(lc2, tables)
 			{
-				lfirst(lc) = get_prestate_rte(r, table, xid, cid, pstate->p_queryEnv);
-				table->rte_indexes = lappend_int(table->rte_indexes, i);
-				break;
+				MV_TriggerTable *table = (MV_TriggerTable *) lfirst(lc2);
+				/*
+				 * if the modified table is found then replace the original RTE with
+				 * "pre-state" RTE and append its index to the list.
+				 */
+				if (r->relid == table->table_id)
+				{
+					lfirst(lc) = get_prestate_rte(r, table, xid, cid, pstate->p_queryEnv);
+					table->rte_paths = lappend(table->rte_paths, lappend_int(list_copy(rte_path), i));
+					break;
+				}
 			}
 		}
 
@@ -1449,12 +1459,12 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
  * by the RTE index.
  */
 static void
-calc_delta(MV_TriggerTable *table, int rte_index, Query *query,
+calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 			DestReceiver *dest_old, DestReceiver *dest_new,
 			TupleDesc *tupdesc_old, TupleDesc *tupdesc_new,
 			QueryEnvironment *queryEnv)
 {
-	ListCell *lc = list_nth_cell(query->rtable, rte_index - 1);
+	ListCell *lc = getRteListCell(query, rte_path);
 	RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
 
 	/* Generate old delta */
@@ -1482,14 +1492,40 @@ calc_delta(MV_TriggerTable *table, int rte_index, Query *query,
  * calculation due to changes on this table finishes.
  */
 static Query*
-rewrite_query_for_postupdate_state(Query *query, MV_TriggerTable *table, int rte_index)
+rewrite_query_for_postupdate_state(Query *query, MV_TriggerTable *table, List *rte_path)
 {
-	ListCell *lc = list_nth_cell(query->rtable, rte_index - 1);
+	ListCell *lc = getRteListCell(query, rte_path);
 
 	/* Retore the original RTE */
 	lfirst(lc) = table->original_rte;
 
 	return query;
+}
+
+/*
+ * getRteListCell
+ *
+ * Get ListCell which contains RTE specified by the given path.
+ */
+static ListCell*
+getRteListCell(Query *query, List *rte_path)
+{
+	ListCell *lc;
+	ListCell *rte_lc = NULL;
+
+	Assert(list_length(rte_path) > 0);
+
+	foreach (lc, rte_path)
+	{
+		int index = lfirst_int(lc);
+		RangeTblEntry	*rte;
+
+		rte_lc = list_nth_cell(query->rtable, index - 1);
+		rte = (RangeTblEntry *) lfirst(rte_lc);
+		if (rte != NULL && rte->rtekind == RTE_SUBQUERY)
+			query = rte->subquery;
+	}
+	return rte_lc;
 }
 
 #define IVM_colname(type, col) makeObjectName("__ivm_" type, col, "_")
