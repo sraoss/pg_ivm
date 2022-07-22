@@ -123,9 +123,33 @@ DELETE FROM mv_base_a WHERE (i,j) = (2,30);
 SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
 ROLLBACK;
 
--- not support MIN(), MAX() aggregate functions
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
+-- support MIN(), MAX() aggregate functions
+BEGIN;
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+INSERT INTO mv_base_a VALUES
+  (1,11), (1,12),
+  (2,21), (2,22),
+  (3,31), (3,32),
+  (4,41), (4,42),
+  (5,51), (5,52);
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+DELETE FROM mv_base_a WHERE (i,j) IN ((1,10), (2,21), (3,32));
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+ROLLBACK;
+
+-- support MIN(), MAX() aggregate functions without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
+SELECT * FROM mv_ivm_min_max;
+INSERT INTO mv_base_a VALUES
+  (0,0), (6,60), (7,70);
+SELECT * FROM mv_ivm_min_max;
+DELETE FROM mv_base_a WHERE (i,j) IN ((0,0), (7,70));
+SELECT * FROM mv_ivm_min_max;
+DELETE FROM mv_base_a;
+SELECT * FROM mv_ivm_min_max;
+ROLLBACK;
 
 -- support subquery in FROM clause
 BEGIN;
@@ -204,6 +228,28 @@ CREATE TABLE base_t (i int);
 SELECT create_immv('mv', 'SELECT * FROM base_t');
 SELECT * FROM mv ORDER BY i;
 INSERT INTO base_t VALUES (1),(NULL);
+SELECT * FROM mv ORDER BY i;
+ROLLBACK;
+
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (NULL, 1), (NULL, 2), (1, 10), (1, 20);
+SELECT create_immv('mv', 'SELECT i, sum(v) FROM base_t GROUP BY i');
+SELECT * FROM mv ORDER BY i;
+UPDATE base_t SET v = v * 10;
+SELECT * FROM mv ORDER BY i;
+ROLLBACK;
+
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (NULL, 1), (NULL, 2), (NULL, 3), (NULL, 4), (NULL, 5);
+SELECT create_immv('mv', 'SELECT i, min(v), max(v) FROM base_t GROUP BY i');
+SELECT * FROM mv ORDER BY i;
+DELETE FROM base_t WHERE v = 1;
+SELECT * FROM mv ORDER BY i;
+DELETE FROM base_t WHERE v = 3;
+SELECT * FROM mv ORDER BY i;
+DELETE FROM base_t WHERE v = 5;
 SELECT * FROM mv ORDER BY i;
 ROLLBACK;
 

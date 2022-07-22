@@ -5,7 +5,8 @@ OBJS = \
 	$(WIN32RES) \
 	createas.o \
 	matview.o \
-	pg_ivm.o
+	pg_ivm.o \
+	ruleutils.o
 PGFILEDESC = "pg_ivm - incremental view maintenance on PostgreSQL"
 
 EXTENSION = pg_ivm

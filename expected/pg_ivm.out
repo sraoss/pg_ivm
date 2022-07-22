@@ -388,11 +388,93 @@ SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
 (5 rows)
 
 ROLLBACK;
--- not support MIN(), MAX() aggregate functions
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j)  FROM mv_base_a GROUP BY i');
-ERROR:  aggregate function min(integer) is not supported on incrementally maintainable materialized view
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MAX(j)  FROM mv_base_a GROUP BY i');
-ERROR:  aggregate function max(integer) is not supported on incrementally maintainable materialized view
+-- support MIN(), MAX() aggregate functions
+BEGIN;
+SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
+NOTICE:  created index "mv_ivm_min_max_index" on immv "mv_ivm_min_max"
+ create_immv 
+-------------
+           5
+(1 row)
+
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+ 1 |  10 |  10 |                 1 |                 1 |             1
+ 2 |  20 |  20 |                 1 |                 1 |             1
+ 3 |  30 |  30 |                 1 |                 1 |             1
+ 4 |  40 |  40 |                 1 |                 1 |             1
+ 5 |  50 |  50 |                 1 |                 1 |             1
+(5 rows)
+
+INSERT INTO mv_base_a VALUES
+  (1,11), (1,12),
+  (2,21), (2,22),
+  (3,31), (3,32),
+  (4,41), (4,42),
+  (5,51), (5,52);
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+ 1 |  10 |  12 |                 3 |                 3 |             3
+ 2 |  20 |  22 |                 3 |                 3 |             3
+ 3 |  30 |  32 |                 3 |                 3 |             3
+ 4 |  40 |  42 |                 3 |                 3 |             3
+ 5 |  50 |  52 |                 3 |                 3 |             3
+(5 rows)
+
+DELETE FROM mv_base_a WHERE (i,j) IN ((1,10), (2,21), (3,32));
+SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+ 1 |  11 |  12 |                 2 |                 2 |             2
+ 2 |  20 |  22 |                 2 |                 2 |             2
+ 3 |  30 |  31 |                 2 |                 2 |             2
+ 4 |  40 |  42 |                 3 |                 3 |             3
+ 5 |  50 |  52 |                 3 |                 3 |             3
+(5 rows)
+
+ROLLBACK;
+-- support MIN(), MAX() aggregate functions without GROUP clause
+BEGIN;
+SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
+NOTICE:  could not create an index on immv "mv_ivm_min_max" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           1
+(1 row)
+
+SELECT * FROM mv_ivm_min_max;
+ min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+-----+-----+-------------------+-------------------+---------------
+  10 |  50 |                 5 |                 5 |             5
+(1 row)
+
+INSERT INTO mv_base_a VALUES
+  (0,0), (6,60), (7,70);
+SELECT * FROM mv_ivm_min_max;
+ min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+-----+-----+-------------------+-------------------+---------------
+   0 |  70 |                 8 |                 8 |             8
+(1 row)
+
+DELETE FROM mv_base_a WHERE (i,j) IN ((0,0), (7,70));
+SELECT * FROM mv_ivm_min_max;
+ min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+-----+-----+-------------------+-------------------+---------------
+  10 |  60 |                 6 |                 6 |             6
+(1 row)
+
+DELETE FROM mv_base_a;
+SELECT * FROM mv_ivm_min_max;
+ min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+-----+-----+-------------------+-------------------+---------------
+     |     |                 0 |                 0 |             0
+(1 row)
+
+ROLLBACK;
 -- support subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery01', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
@@ -628,6 +710,70 @@ SELECT * FROM mv ORDER BY i;
  1
   
 (2 rows)
+
+ROLLBACK;
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (NULL, 1), (NULL, 2), (1, 10), (1, 20);
+SELECT create_immv('mv', 'SELECT i, sum(v) FROM base_t GROUP BY i');
+NOTICE:  created index "mv_index" on immv "mv"
+ create_immv 
+-------------
+           2
+(1 row)
+
+SELECT * FROM mv ORDER BY i;
+ i | sum | __ivm_count_sum__ | __ivm_count__ 
+---+-----+-------------------+---------------
+ 1 |  30 |                 2 |             2
+   |   3 |                 2 |             2
+(2 rows)
+
+UPDATE base_t SET v = v * 10;
+SELECT * FROM mv ORDER BY i;
+ i | sum | __ivm_count_sum__ | __ivm_count__ 
+---+-----+-------------------+---------------
+ 1 | 300 |                 2 |             2
+   |  30 |                 2 |             2
+(2 rows)
+
+ROLLBACK;
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (NULL, 1), (NULL, 2), (NULL, 3), (NULL, 4), (NULL, 5);
+SELECT create_immv('mv', 'SELECT i, min(v), max(v) FROM base_t GROUP BY i');
+NOTICE:  created index "mv_index" on immv "mv"
+ create_immv 
+-------------
+           1
+(1 row)
+
+SELECT * FROM mv ORDER BY i;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+   |   1 |   5 |                 5 |                 5 |             5
+(1 row)
+
+DELETE FROM base_t WHERE v = 1;
+SELECT * FROM mv ORDER BY i;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+   |   2 |   5 |                 4 |                 4 |             4
+(1 row)
+
+DELETE FROM base_t WHERE v = 3;
+SELECT * FROM mv ORDER BY i;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+   |   2 |   5 |                 3 |                 3 |             3
+(1 row)
+
+DELETE FROM base_t WHERE v = 5;
+SELECT * FROM mv ORDER BY i;
+ i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
+---+-----+-----+-------------------+-------------------+---------------
+   |   2 |   4 |                 2 |                 2 |             2
+(1 row)
 
 ROLLBACK;
 -- IMMV containing user defined type
