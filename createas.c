@@ -721,7 +721,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("FOR UPDATE/SHARE clause is not supported on incrementally maintainable materialized view")));
-				if (qry->hasSubLinks && context->sublevels_up == 0)
+				if (qry->hasSubLinks && context->sublevels_up > 0)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
@@ -798,7 +798,6 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 						context->has_subquery = true;
 
 						context->sublevels_up++;
-						ereport(LOG,(errmsg("test RTE SUBQUERY")));
 						check_ivm_restriction_walker((Node *)rte->subquery, context);
 						context->sublevels_up--;
 					}
