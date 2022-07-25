@@ -64,6 +64,8 @@ typedef struct
 typedef struct
 {
 	bool	has_agg;
+	bool	has_subquery;
+	int		sublevels_up;
 } check_ivm_restriction_context;
 
 static void CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
@@ -525,6 +527,12 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 
 					*relids = bms_add_member(*relids, rte->relid);
 				}
+				else if (rte->rtekind == RTE_SUBQUERY)
+				{
+					Query *subquery = rte->subquery;
+					Assert(rte->subquery != NULL);
+					CreateIvmTriggersOnBaseTablesRecurse(subquery, (Node *)subquery, matviewOid, relids, ex_lock);
+				}
 			}
 			break;
 
@@ -646,7 +654,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 static void
 check_ivm_restriction(Node *node)
 {
-	check_ivm_restriction_context context = {false};
+	check_ivm_restriction_context context = {false, false};
 
 	check_ivm_restriction_walker(node, &context);
 }
@@ -713,10 +721,11 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("FOR UPDATE/SHARE clause is not supported on incrementally maintainable materialized view")));
-				if (qry->hasSubLinks)
+				if (qry->hasSubLinks && context->sublevels_up > 0)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("subquery is not supported on incrementally maintainable materialized view")));
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("Only simple subquery is supported")));
 
 				/* system column restrictions */
 				vars = pull_vars_of_level((Node *) qry, 0);
@@ -732,6 +741,15 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 									 errmsg("system column is not supported on incrementally maintainable materialized view")));
 					}
 				}
+				/* subquery restrictions */
+				if (context->sublevels_up > 0 && qry->distinctClause != NIL)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("DISTINCT clause in nested query are not supported on incrementally maintainable materialized view")));
+				if (context->sublevels_up > 0 && qry->hasAggs)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("aggregate functions in nested query are not supported on incrementally maintainable materialized view")));
 
 				context->has_agg |= qry->hasAggs;
 
@@ -776,10 +794,13 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("VALUES is not supported on incrementally maintainable materialized view")));
 					if (rte->rtekind == RTE_SUBQUERY)
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("subquery is not supported on incrementally maintainable materialized view")));
+					{
+						context->has_subquery = true;
 
+						context->sublevels_up++;
+						check_ivm_restriction_walker((Node *)rte->subquery, context);
+						context->sublevels_up--;
+					}
 				}
 
 				query_tree_walker(qry, check_ivm_restriction_walker, (void *) context, QTW_IGNORE_RANGE_TABLE);
@@ -797,6 +818,12 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("expression containing an aggregate in it is not supported on incrementally maintainable materialized view")));
+
+				if (IsA(tle->expr, SubLink))
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("subquery is not supported in targetlist")));
 
 				expression_tree_walker(node, check_ivm_restriction_walker, (void *) context);
 				break;
@@ -838,6 +865,15 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("aggregate function %s is not supported on incrementally maintainable materialized view", aggname)));
+				break;
+			}
+		case T_SubLink:
+			{
+				/* Now, EXISTS clause is supported only */
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+						 errhint("Only simple subquery is supported")));
 				break;
 			}
 		default:
