@@ -28,7 +28,6 @@
 #include "utils/varlena.h"
 
 #include "pg_ivm.h"
-#include "nodes/print.h"
 
 PG_MODULE_MAGIC;
 

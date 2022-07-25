@@ -917,6 +917,51 @@ check_aggregate_supports_ivm(Oid aggfnoid)
 		case F_AVG_FLOAT8:
 		case F_AVG_INTERVAL:
 
+		/* min */
+		case F_MIN_ANYARRAY:
+		case F_MIN_INT8:
+		case F_MIN_INT4:
+		case F_MIN_INT2:
+		case F_MIN_OID:
+		case F_MIN_FLOAT4:
+		case F_MIN_FLOAT8:
+		case F_MIN_DATE:
+		case F_MIN_TIME:
+		case F_MIN_TIMETZ:
+		case F_MIN_MONEY:
+		case F_MIN_TIMESTAMP:
+		case F_MIN_TIMESTAMPTZ:
+		case F_MIN_INTERVAL:
+		case F_MIN_TEXT:
+		case F_MIN_NUMERIC:
+		case F_MIN_BPCHAR:
+		case F_MIN_TID:
+		case F_MIN_ANYENUM:
+		case F_MIN_INET:
+		case F_MIN_PG_LSN:
+
+		/* max */
+		case F_MAX_ANYARRAY:
+		case F_MAX_INT8:
+		case F_MAX_INT4:
+		case F_MAX_INT2:
+		case F_MAX_OID:
+		case F_MAX_FLOAT4:
+		case F_MAX_FLOAT8:
+		case F_MAX_DATE:
+		case F_MAX_TIME:
+		case F_MAX_TIMETZ:
+		case F_MAX_MONEY:
+		case F_MAX_TIMESTAMP:
+		case F_MAX_TIMESTAMPTZ:
+		case F_MAX_INTERVAL:
+		case F_MAX_TEXT:
+		case F_MAX_NUMERIC:
+		case F_MAX_BPCHAR:
+		case F_MAX_TID:
+		case F_MAX_ANYENUM:
+		case F_MAX_INET:
+		case F_MAX_PG_LSN:
 			return true;
 
 		default:
@@ -947,6 +992,52 @@ check_aggregate_supports_ivm(Oid aggfnoid)
 		"avg(float4)",
 		"avg(float8)",
 		"avg(interval)",
+
+		/* min */
+		"min(anyarray)",
+		"min(int8)",
+		"min(int4)",
+		"min(int2)",
+		"min(oid)",
+		"min(float4)",
+		"min(float8)",
+		"min(date)",
+		"min(time without time zone)",
+		"min(time with time zone)",
+		"min(money)",
+		"min(timestamp without time zone)",
+		"min(timestamp with time zone)",
+		"min(interval)",
+		"min(text)",
+		"min(numeric)",
+		"min(character)",
+		"min(tid)",
+		"min(anyenum)",
+		"min(inet)",
+		"min(pg_lsn)",
+
+		/* max */
+		"max(anyarray)",
+		"max(int8)",
+		"max(int4)",
+		"max(int2)",
+		"max(oid)",
+		"max(float4)",
+		"max(float8)",
+		"max(date)",
+		"max(time without time zone)",
+		"max(time with time zone)",
+		"max(money)",
+		"max(timestamp without time zone)",
+		"max(timestamp with time zone)",
+		"max(interval)",
+		"max(text)",
+		"max(numeric)",
+		"max(character)",
+		"max(tid)",
+		"max(anyenum)",
+		"max(inet)",
+		"max(pg_lsn)",
 
 		NULL
 	};

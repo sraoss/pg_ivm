@@ -51,4 +51,8 @@ extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(void);
 extern bool isIvmName(const char *s);
 
+/* ruleutils.c */
+
+extern char *pg_ivm_get_querydef(Query *query, bool pretty);
+
 #endif
