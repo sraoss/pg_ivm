@@ -182,7 +182,7 @@ Time: 3224.741 ms (00:03.225)
 
 ## Supported View Definitions and Restriction
 
-Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some built-in aggregate functions, and simple sub-queries in `FROM` clause. Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries out of `FROM` clause, CTEs, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
+Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some built-in aggregate functions, and simple sub-queries in `FROM` clause. Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, CTEs, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
 
 The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
@@ -194,7 +194,7 @@ Logical replication is not supported, that is, even when a base table at a publi
 
 ### Aggregates
 
-Supported aggregate functions are `count`, `sum`, and `avg`, `min`, and `max`. Currently, only built-in aggregate functions are supported and user defined aggregates cannot be used.
+Supported aggregate functions are `count`, `sum`, `avg`, `min`, and `max`. Currently, only built-in aggregate functions are supported and user defined aggregates cannot be used.
 
 When an IMMV including aggregate is created, some extra columns whose name start with `__ivm` are automatically added to the target list. `__ivm_count__` contains the number of tuples aggregated in each group. In addition, more than one extra columns for each column of aggregated value  are added in order to maintain the value. For example, columns named like  `__ivm_count_avg__` and `__ivm_sum_avg__` are added for maintaining an average value. When a base table is modified, the new aggregated values are incrementally calculated using the old aggregated values and values of related extra  columns stored in the IMMV.
 
