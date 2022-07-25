@@ -16,7 +16,6 @@ INSERT INTO mv_base_b VALUES
   (3,103),
   (4,104);
 
--- CREATE INCREMENTAL MATERIALIZED VIEW mv_ivm_1 AS SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) WITH NO DATA;
 SELECT create_immv('mv_ivm_1', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i)');
 SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 
@@ -151,18 +150,6 @@ DELETE FROM mv_base_a;
 SELECT * FROM mv_ivm_min_max;
 ROLLBACK;
 
--- support subquery in FROM clause
-BEGIN;
-SELECT create_immv('mv_ivm_subquery01', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT * FROM mv_base_b) b WHERE a.i = b.i');
-SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
-INSERT INTO mv_base_b VALUES(5,105);
-SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
-UPDATE mv_base_a SET j = 0 WHERE i = 1;
-SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
-DELETE FROM mv_base_b WHERE (i,k) = (5,105);
-SELECT * FROM mv_ivm_subquery01 ORDER BY 1,2;
-ROLLBACK;
-
 -- support self join view and multiple change on the same table
 BEGIN;
 CREATE TABLE base_t (i int, v int);
@@ -211,6 +198,30 @@ SELECT * FROM mv_ri ORDER BY i1;
 UPDATE ri1 SET i=10 where i=1;
 DELETE FROM ri1 WHERE i=2;
 SELECT * FROM mv_ri ORDER BY i2;
+ROLLBACK;
+
+-- not support subquery for using EXISTS()
+SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+
+-- support simple subquery in FROM clause
+BEGIN;
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_ivm_subquery ORDER BY i,j;
+
+ROLLBACK;
+
+-- support join subquery in FROM clause
+BEGIN;
+SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+SELECT * FROM mv_ivm_join_subquery ORDER BY i,j,k;
+
 ROLLBACK;
 
 -- views including NULL
@@ -347,6 +358,12 @@ SELECT create_immv('mv_ivm15', 'SELECT i, j FROM mv_base_a TABLESAMPLE SYSTEM(50
 -- window functions are not supported
 SELECT create_immv('mv_ivm16', 'SELECT *, cume_dist() OVER (ORDER BY i) AS rank FROM mv_base_a');
 
+-- aggregate function with some options is not supported
+SELECT create_immv('mv_ivm17', 'SELECT COUNT(*) FILTER(WHERE i < 3) FROM mv_base_a');
+SELECT create_immv('mv_ivm18', 'SELECT COUNT(DISTINCT i)  FROM mv_base_a');
+SELECT create_immv('mv_ivm19', 'SELECT array_agg(j ORDER BY i DESC) FROM mv_base_a');
+SELECT create_immv('mv_ivm20', 'SELECT i,SUM(j) FROM mv_base_a GROUP BY GROUPING SETS((i),())');
+
 -- inheritance parent is not supported
 BEGIN;
 CREATE TABLE parent (i int, v int);
@@ -357,17 +374,29 @@ ROLLBACK;
 -- UNION statement is not supported
 SELECT create_immv('mv_ivm22', 'SELECT i,j FROM mv_base_a UNION ALL SELECT i,k FROM mv_base_b');
 
+-- DISTINCT clause in nested query are not supported
+SELECT create_immv('mv_ivm23', 'SELECT * FROM (SELECT DISTINCT i,j FROM mv_base_a) AS tmp');;
+
 -- empty target list is not allowed with IVM
 SELECT create_immv('mv_ivm25', 'SELECT FROM mv_base_a');
 
 -- FOR UPDATE/SHARE is not supported
 SELECT create_immv('mv_ivm26', 'SELECT i,j FROM mv_base_a FOR UPDATE');
+SELECT create_immv('mv_ivm27', 'SELECT * FROM (SELECT i,j FROM mv_base_a FOR UPDATE) AS tmp;');
 
 -- tartget list cannot contain ivm column that start with '__ivm'
 SELECT create_immv('mv_ivm28', 'SELECT i AS "__ivm_count__" FROM mv_base_a');
 
+-- expressions specified in GROUP BY must appear in the target list.
+SELECT create_immv('mv_ivm29', 'SELECT COUNT(i) FROM mv_base_a GROUP BY i;');
+
+-- experssions containing an aggregate is not supported
+SELECT create_immv('mv_ivm30', 'SELECT sum(i)*0.5 FROM mv_base_a');
+SELECT create_immv('mv_ivm31', 'SELECT sum(i)/sum(j) FROM mv_base_a');
+
 -- VALUES is not supported
 SELECT create_immv('mv_ivm_only_values1', 'values(1)');
+SELECT create_immv('mv_ivm_only_values2',  'SELECT * FROM (values(1)) AS tmp');
 
 
 -- base table which has row level security
