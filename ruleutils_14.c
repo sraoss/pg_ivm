@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * ruleutils.c
+ * ruleutils_14.c
  *	  Functions to convert stored expressions/querytrees back to
  *	  source text
  *
@@ -8,8 +8,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
- * IDENTIFICATION
- *	  src/backend/utils/adt/ruleutils.c
+ * Part of src/backend/utils/adt/ruleutils.c in PostgreSQL 14 core
  *
  *-------------------------------------------------------------------------
  */

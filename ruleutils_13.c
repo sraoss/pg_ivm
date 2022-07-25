@@ -1,15 +1,14 @@
 /*-------------------------------------------------------------------------
  *
  * ruleutils_13.c
- *	  XXX: Functions to convert stored expressions/querytrees back to
+ *	  Functions to convert stored expressions/querytrees back to
  *	  source text
  *
  * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
- * IDENTIFICATION
- *	  src/backend/utils/adt/ruleutils.c
+ * Part of src/backend/utils/adt/ruleutils.c in PostgreSQL 13 core
  *
  *-------------------------------------------------------------------------
  */
