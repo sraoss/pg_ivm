@@ -10,7 +10,7 @@
 
 Summary:	PostgreSQL-based distributed RDBMS
 Name:		%{sname}_%{pgmajorversion}
-Version:	1.2	
+Version:	1.2
 Release:	1%{dist}
 License:    BSD
 Vendor:     IVM Development Group
