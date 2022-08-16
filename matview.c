@@ -223,7 +223,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 {
 	Oid			matviewOid;
 	Relation	matviewRel;
-	Query	   *dataQuery;
+	Query	   *dataQuery = NULL; /* initialized to keep compiler happy */
 	Query	   *viewQuery;
 	Oid			tableSpace;
 	Oid			relowner;
