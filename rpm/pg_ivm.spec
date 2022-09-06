@@ -1,6 +1,6 @@
 # How to build RPM:
 #
-#   rpmbuild -ba pgpool.spec --define="pgpool_version 3.4.0" --define="pg_version 93" --define="pghome /usr/pgsql-9.3" --define="dist .rhel6" --define="pgsql_ver 93"
+#   rpmbuild -bb pg_ivm.spec --define "pgmajorversion 14" --define "pginstdir /usr/pgsql-14"
 
 %global sname pg_ivm
 
