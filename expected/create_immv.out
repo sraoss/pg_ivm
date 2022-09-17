@@ -16,11 +16,14 @@ NOTICE:  created index "mv2_index" on immv "mv2"
 
 SELECT create_immv('mv3', 'WITH d AS (DELETE FROM t RETURNING NULL) SELECT * FROM t');
 ERROR:  materialized views must not use data-modifying statements in WITH
-SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
- immvrelid 
------------
- mv
- mv2
+SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+ immvrelid |     get_immv_def      
+-----------+-----------------------
+ mv        |  SELECT i            +
+           |    FROM t
+ mv2       |  SELECT i            +
+           |    FROM t            +
+           |   WHERE ((i % 2) = 0)
 (2 rows)
 
 DROP TABLE t;
@@ -29,16 +32,18 @@ DETAIL:  table mv depends on table t
 table mv2 depends on table t
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 DROP TABLE mv;
-SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
- immvrelid 
------------
- mv2
+SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+ immvrelid |     get_immv_def      
+-----------+-----------------------
+ mv2       |  SELECT i            +
+           |    FROM t            +
+           |   WHERE ((i % 2) = 0)
 (1 row)
 
 DROP TABLE mv2;
-SELECT immvrelid FROM pg_ivm_immv ORDER BY 1;
- immvrelid 
------------
+SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+ immvrelid | get_immv_def 
+-----------+--------------
 (0 rows)
 
 DROP TABLE t;

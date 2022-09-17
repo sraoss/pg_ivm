@@ -11,6 +11,7 @@
  */
 #include "postgres.h"
 
+#include "access/table.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/namespace.h"
@@ -45,6 +46,7 @@ static void parseNameAndColumns(const char *string, List **names, List **colName
 PG_FUNCTION_INFO_V1(create_immv);
 PG_FUNCTION_INFO_V1(refresh_immv);
 PG_FUNCTION_INFO_V1(IVM_prevent_immv_change);
+PG_FUNCTION_INFO_V1(get_immv_def);
 
 /*
  * Call back functions for cleaning up
@@ -320,3 +322,22 @@ PgIvmImmvPrimaryKeyIndexId(void)
 	return pg_ivm_immv_pkey_id;
 }
 
+/*
+ * Return the SELECT part of a IMMV
+ */
+Datum
+get_immv_def(PG_FUNCTION_ARGS)
+{
+	Oid	matviewOid = PG_GETARG_OID(0);
+	Relation matviewRel = NULL;
+	char * querystring = NULL;
+
+	matviewRel = table_open(matviewOid, AccessShareLock);
+	/* Make sure IMMV is a table. */
+	Assert(matviewRel->rd_rel->relkind == RELKIND_RELATION);
+
+	querystring = pg_ivm_get_querydef(get_immv_query(matviewRel), false);
+
+	table_close(matviewRel, NoLock);
+	PG_RETURN_TEXT_P(cstring_to_text(querystring));
+}
