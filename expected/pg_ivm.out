@@ -16,7 +16,7 @@ INSERT INTO mv_base_b VALUES
   (4,104);
 SELECT create_immv('mv_ivm_1', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i)');
 NOTICE:  could not create an index on immv "mv_ivm_1" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -99,7 +99,7 @@ CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
        AS 'SELECT 1' IMMUTABLE;
 SELECT create_immv('mv_ivm_func', 'SELECT * FROM ivm_func()');
 NOTICE:  could not create an index on immv "mv_ivm_func" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -108,7 +108,7 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
 
 SELECT create_immv('mv_ivm_no_tbl', 'SELECT 1');
 NOTICE:  could not create an index on immv "mv_ivm_no_tbl" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -120,7 +120,7 @@ ROLLBACK;
 BEGIN;
 SELECT create_immv('mv_ivm_duplicate', 'SELECT j FROM mv_base_a');
 NOTICE:  could not create an index on immv "mv_ivm_duplicate" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -286,9 +286,6 @@ ROLLBACK;
 -- support aggregate functions without GROUP clause
 BEGIN;
 SELECT create_immv('mv_ivm_group',  'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
-NOTICE:  could not create an index on immv "mv_ivm_group" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
-HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            1
@@ -318,9 +315,6 @@ ROLLBACK;
 -- TRUNCATE a base table in aggregate views without GROUP clause
 BEGIN;
 SELECT create_immv('mv_ivm_group', 'SELECT SUM(j), COUNT(j), AVG(j) FROM mv_base_a');
-NOTICE:  could not create an index on immv "mv_ivm_group" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
-HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            1
@@ -437,9 +431,6 @@ ROLLBACK;
 -- support MIN(), MAX() aggregate functions without GROUP clause
 BEGIN;
 SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
-NOTICE:  could not create an index on immv "mv_ivm_min_max" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
-HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            1
@@ -481,7 +472,7 @@ INSERT INTO base_t VALUES (1, 10), (2, 20), (3, 30);
 SELECT create_immv('mv_self(v1, v2)',
  'SELECT t1.v, t2.v FROM base_t AS t1 JOIN base_t AS t2 ON t1.i = t2.i');
 NOTICE:  could not create an index on immv "mv_self" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -536,7 +527,7 @@ INSERT INTO base_r VALUES (1, 10), (2, 20), (3, 30);
 INSERT INTO base_s VALUES (1, 100), (2, 200), (3, 300);
 SELECT create_immv('mv(v1, v2)', 'SELECT r.v, s.v FROM base_r AS r JOIN base_s AS s USING(i)');;
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -612,7 +603,7 @@ HINT:  Only simple subquery is supported
 BEGIN;
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
 NOTICE:  could not create an index on immv "mv_ivm_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -637,7 +628,7 @@ ROLLBACK;
 BEGIN;
 SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
 NOTICE:  could not create an index on immv "mv_ivm_join_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -672,7 +663,7 @@ CREATE TABLE base_t (i int, v int);
 INSERT INTO base_t VALUES (1,10),(2, NULL);
 SELECT create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -699,7 +690,7 @@ BEGIN;
 CREATE TABLE base_t (i int);
 SELECT create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -824,7 +815,7 @@ CREATE TABLE t_mytype (x mytype);
 SELECT create_immv('mv_mytype',
  'SELECT * FROM t_mytype');
 NOTICE:  could not create an index on immv "mv_mytype" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -971,7 +962,7 @@ GRANT ALL on num_tbl TO PUBLIC;
 SET SESSION AUTHORIZATION ivm_user;
 SELECT create_immv('ivm_rls', 'SELECT * FROM rls_tbl');
 NOTICE:  could not create an index on immv "ivm_rls" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -996,7 +987,7 @@ SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 
 SELECT create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 NOTICE:  could not create an index on immv "ivm_rls2" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
