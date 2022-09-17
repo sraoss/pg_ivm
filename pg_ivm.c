@@ -330,11 +330,19 @@ get_immv_def(PG_FUNCTION_ARGS)
 {
 	Oid	matviewOid = PG_GETARG_OID(0);
 	Relation matviewRel = NULL;
-	char * querystring = NULL;
+	Query *query = NULL;
+	char *querystring = NULL;
 
 	matviewRel = table_open(matviewOid, AccessShareLock);
 	/* Make sure IMMV is a table. */
 	Assert(matviewRel->rd_rel->relkind == RELKIND_RELATION);
+
+	query = get_immv_query(matviewRel);
+	if (query == NULL)
+	{
+		table_close(matviewRel, NoLock);
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
 
 	querystring = pg_ivm_get_querydef(get_immv_query(matviewRel), false);
 
