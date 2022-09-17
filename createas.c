@@ -1203,7 +1203,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 					(errmsg("could not create an index on immv \"%s\" automatically",
 							RelationGetRelationName(matviewRel)),
 					 errdetail("This target list does not have all the primary key columns, "
-							   "or this view does not contain GROUP BY or DISTINCT clause."),
+							   "or this view does not contain DISTINCT clause."),
 					 errhint("Create an index on the immv for efficient incremental maintenance.")));
 			return;
 		}
