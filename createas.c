@@ -1078,7 +1078,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 
 
 	/*
-	 * For aggregate withoug GROUP BY, we do not need to create an index
+	 * For aggregate without GROUP BY, we do not need to create an index
 	 * because the view has only one row.
 	 */
 	if (query->hasAggs && query->groupClause == NIL)
