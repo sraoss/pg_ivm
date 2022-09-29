@@ -49,6 +49,7 @@ extern bool ImmvIncrementalMaintenanceIsEnabled(void);
 extern Query *get_immv_query(Relation matviewRel);
 extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
 extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
+extern Datum ivm_visible_in_prestate(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(void);
 extern bool isIvmName(const char *s);
 

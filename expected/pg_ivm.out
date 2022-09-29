@@ -518,6 +518,24 @@ SELECT * FROM mv_self ORDER BY v1;
  300 | 300
 (4 rows)
 
+--- with sub-transactions
+SAVEPOINT p1;
+INSERT INTO base_t VALUES (7,70);
+RELEASE SAVEPOINT p1;
+INSERT INTO base_t VALUES (7,77);
+SELECT * FROM mv_self ORDER BY v1, v2;
+ v1  | v2  
+-----+-----
+  50 |  50
+  60 |  60
+  70 |  70
+  70 |  77
+  77 |  70
+  77 |  77
+ 130 | 130
+ 300 | 300
+(8 rows)
+
 ROLLBACK;
 -- support simultaneous table changes
 BEGIN;
