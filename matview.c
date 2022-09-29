@@ -139,7 +139,6 @@ static uint64 refresh_immv_datafill(DestReceiver *dest, Query *query,
 static void refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence);
 static void OpenImmvIncrementalMaintenance(void);
 static void CloseImmvIncrementalMaintenance(void);
-static Query *get_immv_query(Relation matviewRel);
 
 static Query *rewrite_query_for_preupdate_state(Query *query, List *tables,
 								  TransactionId xid, CommandId cid,
@@ -586,7 +585,7 @@ CloseImmvIncrementalMaintenance(void)
 /*
  * get_immv_query - get the Query of IMMV.
  */
-static Query *
+Query *
 get_immv_query(Relation matviewRel)
 {
 	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
@@ -2559,7 +2558,7 @@ get_plan_for_recalc(Relation matviewRel, List *namelist, List *keys, Oid *keyTyp
 		char   *viewdef;
 
 		/* get view definition of matview */
-		viewdef = pg_ivm_get_querydef(get_immv_query(matviewRel), false);
+		viewdef = pg_ivm_get_viewdef(matviewRel, false);
 
 		/*
 		 * Build a query string for recalculating values. This is like

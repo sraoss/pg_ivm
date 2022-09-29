@@ -383,7 +383,7 @@ SELECT * FROM mv_ivm_avg_bug ORDER BY 1,2,3;
 ROLLBACK;
 -- support MIN(), MAX() aggregate functions
 BEGIN;
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
+SELECT create_immv('mv_ivm_min_max(i, min_j, max_j)', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
 NOTICE:  created index "mv_ivm_min_max_index" on immv "mv_ivm_min_max"
  create_immv 
 -------------
@@ -391,13 +391,13 @@ NOTICE:  created index "mv_ivm_min_max_index" on immv "mv_ivm_min_max"
 (1 row)
 
 SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
- i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
----+-----+-----+-------------------+-------------------+---------------
- 1 |  10 |  10 |                 1 |                 1 |             1
- 2 |  20 |  20 |                 1 |                 1 |             1
- 3 |  30 |  30 |                 1 |                 1 |             1
- 4 |  40 |  40 |                 1 |                 1 |             1
- 5 |  50 |  50 |                 1 |                 1 |             1
+ i | min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+---+-------+-------+---------------------+---------------------+---------------
+ 1 |    10 |    10 |                   1 |                   1 |             1
+ 2 |    20 |    20 |                   1 |                   1 |             1
+ 3 |    30 |    30 |                   1 |                   1 |             1
+ 4 |    40 |    40 |                   1 |                   1 |             1
+ 5 |    50 |    50 |                   1 |                   1 |             1
 (5 rows)
 
 INSERT INTO mv_base_a VALUES
@@ -407,61 +407,61 @@ INSERT INTO mv_base_a VALUES
   (4,41), (4,42),
   (5,51), (5,52);
 SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
- i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
----+-----+-----+-------------------+-------------------+---------------
- 1 |  10 |  12 |                 3 |                 3 |             3
- 2 |  20 |  22 |                 3 |                 3 |             3
- 3 |  30 |  32 |                 3 |                 3 |             3
- 4 |  40 |  42 |                 3 |                 3 |             3
- 5 |  50 |  52 |                 3 |                 3 |             3
+ i | min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+---+-------+-------+---------------------+---------------------+---------------
+ 1 |    10 |    12 |                   3 |                   3 |             3
+ 2 |    20 |    22 |                   3 |                   3 |             3
+ 3 |    30 |    32 |                   3 |                   3 |             3
+ 4 |    40 |    42 |                   3 |                   3 |             3
+ 5 |    50 |    52 |                   3 |                   3 |             3
 (5 rows)
 
 DELETE FROM mv_base_a WHERE (i,j) IN ((1,10), (2,21), (3,32));
 SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
- i | min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
----+-----+-----+-------------------+-------------------+---------------
- 1 |  11 |  12 |                 2 |                 2 |             2
- 2 |  20 |  22 |                 2 |                 2 |             2
- 3 |  30 |  31 |                 2 |                 2 |             2
- 4 |  40 |  42 |                 3 |                 3 |             3
- 5 |  50 |  52 |                 3 |                 3 |             3
+ i | min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+---+-------+-------+---------------------+---------------------+---------------
+ 1 |    11 |    12 |                   2 |                   2 |             2
+ 2 |    20 |    22 |                   2 |                   2 |             2
+ 3 |    30 |    31 |                   2 |                   2 |             2
+ 4 |    40 |    42 |                   3 |                   3 |             3
+ 5 |    50 |    52 |                   3 |                   3 |             3
 (5 rows)
 
 ROLLBACK;
 -- support MIN(), MAX() aggregate functions without GROUP clause
 BEGIN;
-SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
+SELECT create_immv('mv_ivm_min_max(min_j, max_j)', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
  create_immv 
 -------------
            1
 (1 row)
 
 SELECT * FROM mv_ivm_min_max;
- min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
------+-----+-------------------+-------------------+---------------
-  10 |  50 |                 5 |                 5 |             5
+ min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+-------+-------+---------------------+---------------------+---------------
+    10 |    50 |                   5 |                   5 |             5
 (1 row)
 
 INSERT INTO mv_base_a VALUES
   (0,0), (6,60), (7,70);
 SELECT * FROM mv_ivm_min_max;
- min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
------+-----+-------------------+-------------------+---------------
-   0 |  70 |                 8 |                 8 |             8
+ min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+-------+-------+---------------------+---------------------+---------------
+     0 |    70 |                   8 |                   8 |             8
 (1 row)
 
 DELETE FROM mv_base_a WHERE (i,j) IN ((0,0), (7,70));
 SELECT * FROM mv_ivm_min_max;
- min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
------+-----+-------------------+-------------------+---------------
-  10 |  60 |                 6 |                 6 |             6
+ min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+-------+-------+---------------------+---------------------+---------------
+    10 |    60 |                   6 |                   6 |             6
 (1 row)
 
 DELETE FROM mv_base_a;
 SELECT * FROM mv_ivm_min_max;
- min | max | __ivm_count_min__ | __ivm_count_max__ | __ivm_count__ 
------+-----+-------------------+-------------------+---------------
-     |     |                 0 |                 0 |             0
+ min_j | max_j | __ivm_count_min_j__ | __ivm_count_max_j__ | __ivm_count__ 
+-------+-------+---------------------+---------------------+---------------
+       |       |                   0 |                   0 |             0
 (1 row)
 
 ROLLBACK;

@@ -124,7 +124,7 @@ ROLLBACK;
 
 -- support MIN(), MAX() aggregate functions
 BEGIN;
-SELECT create_immv('mv_ivm_min_max', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
+SELECT create_immv('mv_ivm_min_max(i, min_j, max_j)', 'SELECT i, MIN(j), MAX(j)  FROM mv_base_a GROUP BY i');
 SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
 INSERT INTO mv_base_a VALUES
   (1,11), (1,12),
@@ -139,7 +139,7 @@ ROLLBACK;
 
 -- support MIN(), MAX() aggregate functions without GROUP clause
 BEGIN;
-SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
+SELECT create_immv('mv_ivm_min_max(min_j, max_j)', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
 SELECT * FROM mv_ivm_min_max;
 INSERT INTO mv_base_a VALUES
   (0,0), (6,60), (7,70);
