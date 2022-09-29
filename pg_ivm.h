@@ -46,6 +46,7 @@ extern void makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, 
 extern ObjectAddress ExecRefreshImmv(const RangeVar *relation, bool skipData,
 									 const char *queryString, QueryCompletion *qc);
 extern bool ImmvIncrementalMaintenanceIsEnabled(void);
+extern Query *get_immv_query(Relation matviewRel);
 extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
 extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(void);
@@ -53,6 +54,6 @@ extern bool isIvmName(const char *s);
 
 /* ruleutils.c */
 
-extern char *pg_ivm_get_querydef(Query *query, bool pretty);
+extern char *pg_ivm_get_viewdef(Relation immvrel, bool pretty);
 
 #endif
