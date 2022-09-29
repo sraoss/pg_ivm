@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 150000)
+#include "utils/rel.h"
 #include "utils/ruleutils.h"
 #elif defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 #include "ruleutils_14.c"
@@ -61,7 +62,7 @@ pg_ivm_get_viewdef(Relation immvrel, bool pretty)
 	query = copyObject(query);
 	foreach (lc, query->targetList)
 	{
-		TargetEntry *tle = (TargetEntry *) lfirst(l);
+		TargetEntry *tle = (TargetEntry *) lfirst(lc);
 
 		if (tle->resjunk)
 			continue;           /* ignore junk entries */
