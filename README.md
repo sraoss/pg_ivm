@@ -101,6 +101,12 @@ refresh_immv(immv_name text, with_data bool) RETURNS bigint
 
 The with_data flag is corresponding to `WITH [NO] DATA` option of REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
 
+#### get_immv_def
+
+`get_immv_def` reconstructs the underlying SELECT command for an IMMV. (This is a decompiled reconstruction, not the original text of the command.)
+```
+get_immv_def(immv regclass) RETURNS text
+```
 
 ### IMMV metadata catalog
 
