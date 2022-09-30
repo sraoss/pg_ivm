@@ -11,3 +11,8 @@ RETURNS text
 STRICT
 AS 'MODULE_PATHNAME', 'get_immv_def'
 LANGUAGE C;
+
+-- event trigger
+
+DROP EVENT TRIGGER pg_ivm_sql_drop_trigger;
+DROP FUNCTION pg_ivm_sql_drop_trigger_func;
