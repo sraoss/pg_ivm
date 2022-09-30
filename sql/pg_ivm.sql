@@ -168,6 +168,14 @@ WITH
  dlt_t AS (DELETE FROM base_t WHERE i IN (4,5)  RETURNING 1)
 SELECT NULL;
 SELECT * FROM mv_self ORDER BY v1;
+
+--- with sub-transactions
+SAVEPOINT p1;
+INSERT INTO base_t VALUES (7,70);
+RELEASE SAVEPOINT p1;
+INSERT INTO base_t VALUES (7,77);
+SELECT * FROM mv_self ORDER BY v1, v2;
+
 ROLLBACK;
 
 -- support simultaneous table changes
