@@ -11,10 +11,13 @@
  */
 #include "postgres.h"
 
+#include "access/genam.h"
 #include "access/table.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
+#include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#include "catalog/objectaccess.h"
 #include "catalog/pg_namespace_d.h"
 #include "catalog/pg_trigger_d.h"
 #include "commands/trigger.h"
@@ -23,6 +26,7 @@
 #include "parser/scansup.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/regproc.h"
 #include "utils/rel.h"
@@ -35,12 +39,17 @@ PG_MODULE_MAGIC;
 static Oid pg_ivm_immv_id = InvalidOid;
 static Oid pg_ivm_immv_pkey_id = InvalidOid;
 
+static object_access_hook_type PrevObjectAccessHook = NULL;
+
 void		_PG_init(void);
 
 static void IvmXactCallback(XactEvent event, void *arg);
 static void IvmSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
 							   SubTransactionId parentSubid, void *arg);
 static void parseNameAndColumns(const char *string, List **names, List **colNames);
+
+static void PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
+								  Oid objectId, int subId, void *arg);
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(create_immv);
@@ -75,6 +84,9 @@ _PG_init(void)
 {
 	RegisterXactCallback(IvmXactCallback, NULL);
 	RegisterSubXactCallback(IvmSubXactCallback, NULL);
+
+	PrevObjectAccessHook = object_access_hook;
+	object_access_hook = PgIvmObjectAccessHook;
 }
 
 /*
@@ -349,4 +361,38 @@ get_immv_def(PG_FUNCTION_ARGS)
 
 	table_close(matviewRel, NoLock);
 	PG_RETURN_TEXT_P(cstring_to_text(querystring));
+}
+
+/*
+ * object_access_hook function for dropping an IMMV
+ */
+static void
+PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
+					  Oid objectId, int subId, void *arg)
+{
+	if (PrevObjectAccessHook)
+		PrevObjectAccessHook(access, classId, objectId, subId, arg);
+
+	if (access == OAT_DROP && classId == RelationRelationId && !OidIsValid(subId))
+	{
+		Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+		SysScanDesc scan;
+		ScanKeyData key;
+		HeapTuple tup;
+
+		ScanKeyInit(&key,
+					Anum_pg_ivm_immv_immvrelid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(objectId));
+		scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+
+		tup = systable_getnext(scan);
+
+		if (HeapTupleIsValid(tup))
+			CatalogTupleDelete(pgIvmImmv, &tup->t_self);
+
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+	}
 }
