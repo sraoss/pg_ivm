@@ -1043,6 +1043,24 @@ DELETE FROM mv_ivm_1;
 ERROR:  cannot change materialized view "mv_ivm_1"
 TRUNCATE mv_ivm_1;
 ERROR:  cannot change materialized view "mv_ivm_1"
+-- get_immv_def function
+SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+ immvrelid |           get_immv_def           
+-----------+----------------------------------
+ mv_ivm_1  |  SELECT a.i,                    +
+           |     a.j,                        +
+           |     b.k                         +
+           |    FROM (mv_base_a a            +
+           |      JOIN mv_base_b b USING (i))
+(1 row)
+
+-- mv_base_b is not immv
+SELECT 'mv_base_b'::regclass, get_immv_def('mv_base_b');
+ regclass  | get_immv_def 
+-----------+--------------
+ mv_base_b | 
+(1 row)
+
 DROP TABLE mv_base_b CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table mv_ivm_1

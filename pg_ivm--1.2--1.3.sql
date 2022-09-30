@@ -5,3 +5,9 @@ RETURNS bool
 STABLE
 AS 'MODULE_PATHNAME', 'ivm_visible_in_prestate'
 LANGUAGE C;
+
+CREATE FUNCTION get_immv_def(IN immvrelid regclass)
+RETURNS text
+STRICT
+AS 'MODULE_PATHNAME', 'get_immv_def'
+LANGUAGE C;

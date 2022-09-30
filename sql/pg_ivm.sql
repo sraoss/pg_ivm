@@ -460,5 +460,10 @@ UPDATE  mv_ivm_1 SET k = 1 WHERE i = 1;
 DELETE FROM mv_ivm_1;
 TRUNCATE mv_ivm_1;
 
+-- get_immv_def function
+SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+-- mv_base_b is not immv
+SELECT 'mv_base_b'::regclass, get_immv_def('mv_base_b');
+
 DROP TABLE mv_base_b CASCADE;
 DROP TABLE mv_base_a CASCADE;

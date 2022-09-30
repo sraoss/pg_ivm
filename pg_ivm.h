@@ -43,6 +43,7 @@ extern void makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, 
 
 /* matview.c */
 
+extern Query *get_immv_query(Relation matviewRel);
 extern ObjectAddress ExecRefreshImmv(const RangeVar *relation, bool skipData,
 									 const char *queryString, QueryCompletion *qc);
 extern bool ImmvIncrementalMaintenanceIsEnabled(void);
