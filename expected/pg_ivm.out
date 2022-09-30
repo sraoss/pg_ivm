@@ -430,7 +430,7 @@ SELECT * FROM mv_ivm_min_max ORDER BY 1,2,3;
 ROLLBACK;
 -- support MIN(), MAX() aggregate functions without GROUP clause
 BEGIN;
-SELECT create_immv('mv_ivm_min_max', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
+SELECT create_immv('mv_ivm_min_max(min_j, max_j)', 'SELECT MIN(j), MAX(j)  FROM mv_base_a');
  create_immv 
 -------------
            1

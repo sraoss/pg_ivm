@@ -333,18 +333,19 @@ get_immv_def(PG_FUNCTION_ARGS)
 	Query *query = NULL;
 	char *querystring = NULL;
 
-	matviewRel = table_open(matviewOid, AccessShareLock);
 	/* Make sure IMMV is a table. */
-	Assert(matviewRel->rd_rel->relkind == RELKIND_RELATION);
+	if (get_rel_relkind(matviewOid) != RELKIND_RELATION)
+		PG_RETURN_NULL();
 
+	matviewRel = table_open(matviewOid, AccessShareLock);
 	query = get_immv_query(matviewRel);
 	if (query == NULL)
 	{
 		table_close(matviewRel, NoLock);
-		PG_RETURN_TEXT_P(cstring_to_text(""));
+		PG_RETURN_NULL();
 	}
 
-	querystring = pg_ivm_get_querydef(get_immv_query(matviewRel), false);
+	querystring = pg_ivm_get_viewdef(matviewRel, false);
 
 	table_close(matviewRel, NoLock);
 	PG_RETURN_TEXT_P(cstring_to_text(querystring));

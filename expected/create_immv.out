@@ -21,7 +21,7 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
 -----------+-----------------------
  mv        |  SELECT i            +
            |    FROM t
- mv2       |  SELECT i            +
+ mv2       |  SELECT i AS x       +
            |    FROM t            +
            |   WHERE ((i % 2) = 0)
 (2 rows)
@@ -35,7 +35,7 @@ DROP TABLE mv;
 SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
  immvrelid |     get_immv_def      
 -----------+-----------------------
- mv2       |  SELECT i            +
+ mv2       |  SELECT i AS x       +
            |    FROM t            +
            |   WHERE ((i % 2) = 0)
 (1 row)
