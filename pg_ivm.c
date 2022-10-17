@@ -396,3 +396,33 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		table_close(pgIvmImmv, NoLock);
 	}
 }
+
+/*
+ * isImmv
+ *
+ * Check if this is a IMMV from oid.
+ */
+bool
+isImmv(Oid immv_oid)
+{
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(immv_oid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+	tup = systable_getnext(scan);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+
+	if (!HeapTupleIsValid(tup))
+		return false;
+	else
+		return true;
+}

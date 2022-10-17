@@ -8,6 +8,10 @@ SELECT create_immv('mv3', 'WITH d AS (DELETE FROM t RETURNING NULL) SELECT * FRO
 
 SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
 
+-- contain immv
+SELECT create_immv('mv_in_immv01', 'SELECT i FROM mv');
+SELECT create_immv('mv_in_immv02', 'SELECT t.i FROM t INNER JOIN mv2 ON t.i = mv2.x');
+
 DROP TABLE t;
 
 DROP TABLE mv;

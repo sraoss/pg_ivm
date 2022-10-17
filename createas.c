@@ -793,6 +793,11 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("VALUES is not supported on incrementally maintainable materialized view")));
+					if (rte->relkind == RELKIND_RELATION && isImmv(rte->relid))
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("including IMMV in definition is not supported on incrementally maintainable materialized view")));
+
 					if (rte->rtekind == RTE_SUBQUERY)
 					{
 						context->has_subquery = true;

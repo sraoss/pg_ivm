@@ -26,6 +26,11 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
            |   WHERE ((i % 2) = 0)
 (2 rows)
 
+-- contain immv
+SELECT create_immv('mv_in_immv01', 'SELECT i FROM mv');
+ERROR:  including IMMV in definition is not supported on incrementally maintainable materialized view
+SELECT create_immv('mv_in_immv02', 'SELECT t.i FROM t INNER JOIN mv2 ON t.i = mv2.x');
+ERROR:  including IMMV in definition is not supported on incrementally maintainable materialized view
 DROP TABLE t;
 ERROR:  cannot drop table t because other objects depend on it
 DETAIL:  table mv depends on table t
