@@ -30,6 +30,7 @@
 extern void CreateChangePreventTrigger(Oid matviewOid);
 extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
+extern bool isImmv(Oid immv_oid);
 
 /* createas.c */
 
