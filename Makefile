@@ -14,6 +14,6 @@ DATA = pg_ivm--1.0.sql pg_ivm--1.0--1.1.sql pg_ivm--1.1--1.2.sql pg_ivm--1.2--1.
 
 REGRESS = pg_ivm create_immv refresh_immv
 
-PG_CONFIG = pg_config
+PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
