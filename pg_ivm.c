@@ -197,6 +197,10 @@ create_immv(PG_FUNCTION_ARGS)
 
 	parsetree = linitial_node(RawStmt, parsetree_list);
 
+	/* view definition should spcify SELECT query */
+	if (!IsA(parsetree->stmt, SelectStmt))
+		elog(ERROR, "view definition must specify SELECT statement");
+
 	ctas = makeNode(CreateTableAsStmt);
 	ctas->query = parsetree->stmt;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)

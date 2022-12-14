@@ -12,6 +12,13 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
 SELECT create_immv('mv_in_immv01', 'SELECT i FROM mv');
 SELECT create_immv('mv_in_immv02', 'SELECT t.i FROM t INNER JOIN mv2 ON t.i = mv2.x');
 
+-- SQL other than SELECT
+SELECT create_immv('mv_in_create', 'CREATE TABLE in_create(i int)');
+SELECT create_immv('mv_in_insert', 'INSERT INTO t VALUES(10)');
+SELECT create_immv('mv_in_update', 'UPDATE t SET i = 10');
+SELECT create_immv('mv_in_delete', 'DELETE FROM t');
+SELECT create_immv('mv_in_drop', 'DROP TABLE t');
+
 DROP TABLE t;
 
 DROP TABLE mv;
