@@ -199,7 +199,9 @@ create_immv(PG_FUNCTION_ARGS)
 
 	/* view definition should spcify SELECT query */
 	if (!IsA(parsetree->stmt, SelectStmt))
-		elog(ERROR, "view definition must specify SELECT statement");
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("view definition must specify SELECT statement")));
 
 	ctas = makeNode(CreateTableAsStmt);
 	ctas->query = parsetree->stmt;
