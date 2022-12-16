@@ -635,6 +635,18 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 		}
 	}
 
+	/*
+	 * XXX: When using DELETE or UPDATE, we must use exclusive lock for now
+	 * because apply_old_delta(_with_count) doesn't work in concurrent situations.
+	 *
+	 * If the view doesn't have aggregate, distinct, or tuple duplicate, then it
+	 * would work. However, we don't have any way to guarantee the view has a unique
+	 * key before opening the IMMV at the maintenance time because users may drop
+	 * the unique index. We need something to resolve the issue!!
+	 */
+	if (type == TRIGGER_TYPE_DELETE || type == TRIGGER_TYPE_UPDATE)
+		ex_lock = true;
+
 	ivm_trigger->funcname =
 		(timing == TRIGGER_TYPE_BEFORE ? SystemFuncName("IVM_immediate_before") : SystemFuncName("IVM_immediate_maintenance"));
 
