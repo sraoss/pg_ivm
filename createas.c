@@ -289,6 +289,15 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 	ParseState *pstate = make_parsestate(NULL);
 	FuncCall *fn;
 
+	/*
+	 * Check the length of colunm name list not to override names of
+	 * additional columns
+	 */
+	if (list_length(colNames) > list_length(query->targetList))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("too many column names were specified")));
+
 	rewritten = copyObject(query);
 	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
@@ -321,10 +330,11 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 		foreach(lc, rewritten->targetList)
 		{
 			TargetEntry *tle = (TargetEntry *) lfirst(lc);
-			char *resname = (colNames == NIL ? tle->resname : strVal(list_nth(colNames, tle->resno - 1)));
+			char *resname = (colNames == NIL || foreach_current_index(lc) >= list_length(colNames) ?
+								tle->resname : strVal(list_nth(colNames, tle->resno - 1)));
 
 			if (IsA(tle->expr, Aggref))
-				makeIvmAggColumn(pstate, (Aggref *)tle->expr, resname, &next_resno, &aggs);
+				makeIvmAggColumn(pstate, (Aggref *) tle->expr, resname, &next_resno, &aggs);
 		}
 		rewritten->targetList = list_concat(rewritten->targetList, aggs);
 	}
