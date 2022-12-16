@@ -31,6 +31,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
+#include "optimizer/prep.h"
 #include "parser/parser.h"
 #include "parser/parsetree.h"
 #include "parser/parse_clause.h"
@@ -1287,9 +1288,6 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 	int i;
 	Bitmapset *keys = NULL;
 	Relids	rels_in_from;
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-	PlannerInfo root;
-#endif
 
 	/*
 	 * Collect primary key attributes from all tables used in query. The key attributes
@@ -1341,28 +1339,25 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 		if (IsA(tle->expr, Var))
 		{
 			Var *var = (Var*) tle->expr;
-			Bitmapset *attnos = list_nth(key_attnos_list, var->varno - 1);
+			Bitmapset *key_attnos = list_nth(key_attnos_list, var->varno - 1);
 
 			/* check if this attribute is from a base table's primary key */
-			if (bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber, attnos))
+			if (bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber, key_attnos))
 			{
 				/*
 				 * Remove found key attributes from key_attnos_list, and add this
 				 * to the result list.
 				 */
-				bms_del_member(attnos, var->varattno - FirstLowInvalidHeapAttributeNumber);
+				bms_del_member(key_attnos, var->varattno - FirstLowInvalidHeapAttributeNumber);
 				keys = bms_add_member(keys, i - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
 		i++;
 	}
 
-	/* Collect relations appearing in the FROM clause */
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-	rels_in_from = pull_varnos_of_level(&root, (Node *)query->jointree, 0);
-#else
-	rels_in_from = pull_varnos_of_level((Node *)query->jointree, 0);
-#endif
+	/* Collect RTE indexes of relations appearing in the FROM clause */
+	rels_in_from = get_relids_in_jointree((Node *) query->jointree, false);
+
 	/*
 	 * Check if all key attributes of relations in FROM are appearing in the target
 	 * list.  If an attribute remains in key_attnos_list in spite of the table is used

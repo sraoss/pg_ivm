@@ -454,6 +454,25 @@ DROP TABLE num_tbl CASCADE;
 DROP USER ivm_user;
 DROP USER ivm_admin;
 
+-- automatic index creation
+BEGIN;
+CREATE TABLE base_a (i int primary key, j int);
+CREATE TABLE base_b (i int primary key, j int);
+
+--- group by: create an index
+SELECT create_immv('mv_idx1', 'SELECT i, sum(j) FROM base_a GROUP BY i');
+
+--- distinct: create an index
+SELECT create_immv('mv_idx2', 'SELECT DISTINCT j FROM base_a');
+
+--- with all pkey columns: create an index
+SELECT create_immv('mv_idx3(i_a, i_b)', 'SELECT a.i, b.i FROM base_a a, base_b b');
+
+--- missing some pkey columns: no index
+SELECT create_immv('mv_idx4', 'SELECT j FROM base_a');
+SELECT create_immv('mv_idx5', 'SELECT a.i, b.j FROM base_a a, base_b b');
+ROLLBACK;
+
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
 UPDATE  mv_ivm_1 SET k = 1 WHERE i = 1;
