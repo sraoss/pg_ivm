@@ -150,6 +150,25 @@ DELETE FROM mv_base_a;
 SELECT * FROM mv_ivm_min_max;
 ROLLBACK;
 
+-- aggregate views with column names specified
+BEGIN;
+SELECT create_immv('mv_ivm_agg(a)', 'SELECT i, SUM(j) FROM mv_base_a GROUP BY i');
+INSERT INTO mv_base_a VALUES (1,100), (2,200), (3,300);
+UPDATE mv_base_a SET j = 2000 WHERE (i,j) = (2,20);
+DELETE FROM mv_base_a WHERE (i,j) = (3,30);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2;
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_ivm_agg(a,b)', 'SELECT i, SUM(j) FROM mv_base_a GROUP BY i');
+INSERT INTO mv_base_a VALUES (1,100), (2,200), (3,300);
+UPDATE mv_base_a SET j = 2000 WHERE (i,j) = (2,20);
+DELETE FROM mv_base_a WHERE (i,j) = (3,30);
+SELECT * FROM mv_ivm_agg ORDER BY 1,2;
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_ivm_agg(a,b,c)', 'SELECT i, SUM(j) FROM mv_base_a GROUP BY i');
+ROLLBACK;
+
 -- support self join view and multiple change on the same table
 BEGIN;
 CREATE TABLE base_t (i int, v int);
