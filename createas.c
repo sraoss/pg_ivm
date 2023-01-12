@@ -1326,8 +1326,14 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 		/* skip NEW/OLD entries */
 		if (i >= first_rtindex)
 		{
+			/* for subqueries, scan recursively */
+			if (r->rtekind == RTE_SUBQUERY)
+			{
+				key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList, true);
+				has_pkey = (key_attnos != NULL);
+			}
 			/* for tables, call get_primary_key_attnos */
-			if (r->rtekind == RTE_RELATION)
+			else if (r->rtekind == RTE_RELATION)
 			{
 				Oid constraintOid;
 				key_attnos = get_primary_key_attnos(r->relid, false, &constraintOid);
