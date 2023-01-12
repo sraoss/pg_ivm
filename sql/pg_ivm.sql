@@ -257,6 +257,50 @@ SELECT * FROM mv_ivm_join_subquery ORDER BY i,j,k;
 
 ROLLBACK;
 
+-- support simple CTE
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'SELECT * FROM (WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH x AS ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) SELECT * FROM x');
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+SELECT * FROM mv_cte ORDER BY i,j,k;
+ROLLBACK;
+
 -- views including NULL
 BEGIN;
 CREATE TABLE base_t (i int, v int);

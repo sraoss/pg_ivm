@@ -1128,6 +1128,20 @@ rewrite_query_for_preupdate_state(Query *query, List *tables,
 	/* XXX: Is necessary? Is this right timing? */
 	AcquireRewriteLocks(query, true, false);
 
+	/* convert CTEs to subqueries */
+	foreach (lc, query->cteList)
+	{
+		PlannerInfo root;
+		CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+
+		if (cte->cterefcount == 0)
+			continue;
+
+		root.parse = query;
+		inline_cte(&root, cte);
+	}
+	query->cteList = NIL;
+
 	i = 1;
 	foreach(lc, query->rtable)
 	{

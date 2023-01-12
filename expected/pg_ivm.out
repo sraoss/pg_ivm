@@ -740,6 +740,140 @@ SELECT * FROM mv_ivm_join_subquery ORDER BY i,j,k;
 (8 rows)
 
 ROLLBACK;
+-- support simple CTE
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+NOTICE:  could not create an index on immv "mv_cte" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ i | j  
+---+----
+ 1 | 10
+ 2 | 20
+ 2 | 20
+ 3 | 30
+ 3 | 30
+ 4 | 40
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i');
+NOTICE:  could not create an index on immv "mv_cte" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ i | j  
+---+----
+ 1 | 10
+ 2 | 20
+ 2 | 20
+ 3 | 30
+ 3 | 30
+ 4 | 40
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+NOTICE:  could not create an index on immv "mv_cte" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ i | j  
+---+----
+ 1 | 10
+ 2 | 20
+ 2 | 20
+ 3 | 30
+ 3 | 30
+ 4 | 40
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_cte',
+    'SELECT * FROM (WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+NOTICE:  could not create an index on immv "mv_cte" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ i | j  
+---+----
+ 1 | 10
+ 2 | 20
+ 2 | 20
+ 3 | 30
+ 3 | 30
+ 4 | 40
+(6 rows)
+
+ROLLBACK;
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH x AS ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) SELECT * FROM x');
+NOTICE:  could not create an index on immv "mv_cte" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+--
+(1 row)
+
+SELECT * FROM mv_cte ORDER BY i,j,k;
+ i | j  |  k  
+---+----+-----
+ 1 | 10 | 101
+ 1 | 10 | 111
+ 1 | 11 | 101
+ 1 | 11 | 111
+ 2 | 20 | 102
+ 2 | 22 | 102
+ 3 | 30 | 103
+ 3 | 30 | 133
+(8 rows)
+
+ROLLBACK;
 -- views including NULL
 BEGIN;
 CREATE TABLE base_t (i int, v int);
@@ -920,7 +1054,14 @@ ERROR:  OUTER JOIN is not supported on incrementally maintainable materialized v
 -- CTE is not supported
 SELECT create_immv('mv',
     'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i;');
-ERROR:  CTE is not supported on incrementally maintainable materialized view
+NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
 -- contain system column
 SELECT create_immv('mv_ivm01', 'SELECT i,j,xmin FROM mv_base_a');
 ERROR:  system column is not supported on incrementally maintainable materialized view
@@ -1162,7 +1303,17 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
            |     b.k                         +
            |    FROM (mv_base_a a            +
            |      JOIN mv_base_b b USING (i))
-(1 row)
+ mv        |  WITH b AS (                    +
+           |          SELECT mv_base_b.i,    +
+           |             mv_base_b.k         +
+           |            FROM mv_base_b       +
+           |         )                       +
+           |  SELECT a.i,                    +
+           |     a.j                         +
+           |    FROM mv_base_a a,            +
+           |     b                           +
+           |   WHERE (a.i = b.i)
+(2 rows)
 
 -- mv_base_b is not immv
 SELECT 'mv_base_b'::regclass, get_immv_def('mv_base_b');
@@ -1172,8 +1323,9 @@ SELECT 'mv_base_b'::regclass, get_immv_def('mv_base_b');
 (1 row)
 
 DROP TABLE mv_base_b CASCADE;
-NOTICE:  drop cascades to 3 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table mv_ivm_1
+drop cascades to table mv
 drop cascades to view b_view
 drop cascades to materialized view b_mview
 DROP TABLE mv_base_a CASCADE;
