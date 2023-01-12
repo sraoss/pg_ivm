@@ -490,6 +490,9 @@ SELECT create_immv('mv_idx3(i_a, i_b)', 'SELECT a.i, b.i FROM base_a a, base_b b
 --- missing some pkey columns: no index
 SELECT create_immv('mv_idx4', 'SELECT j FROM base_a');
 SELECT create_immv('mv_idx5', 'SELECT a.i, b.j FROM base_a a, base_b b');
+
+--- subqueries
+SELECT create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
 ROLLBACK;
 
 -- prevent IMMV chanages

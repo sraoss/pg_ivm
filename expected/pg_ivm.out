@@ -1130,6 +1130,14 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
            0
 (1 row)
 
+--- subqueries
+SELECT create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
+NOTICE:  created index "mv_idx6_index" on immv "mv_idx6"
+ create_immv 
+-------------
+           0
+(1 row)
+
 ROLLBACK;
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
