@@ -292,6 +292,14 @@ ROLLBACK;
 
 BEGIN;
 SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM (SELECT * FROM mv_base_b) b2) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
     'WITH x AS ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) SELECT * FROM x');
 WITH
  ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
@@ -299,7 +307,11 @@ WITH
  bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
 SELECT;
 SELECT * FROM mv_cte ORDER BY i,j,k;
-ROLLBACK;
+END; -- don't remove for get_immv_def test
+
+--- disallow not-simple CTE
+SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT DISTINCT i FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
 
 -- views including NULL
 BEGIN;
@@ -391,10 +403,6 @@ ROLLBACK;
 -- outer join is not supported
 SELECT create_immv('mv(a,b)',
     'SELECT a.i, b.i FROM mv_base_a a LEFT JOIN mv_base_b b ON a.i=b.i');
-
--- CTE is not supported
-SELECT create_immv('mv',
-    'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i;');
 
 -- contain system column
 SELECT create_immv('mv_ivm01', 'SELECT i,j,xmin FROM mv_base_a');
