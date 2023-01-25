@@ -227,9 +227,6 @@ DELETE FROM ri1 WHERE i=2;
 SELECT * FROM mv_ri ORDER BY i2;
 ROLLBACK;
 
--- not support subquery for using EXISTS()
-SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
-
 -- support simple subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
@@ -238,6 +235,15 @@ INSERT INTO mv_base_b VALUES(3,300);
 SELECT * FROM mv_ivm_subquery ORDER BY i,j;
 
 ROLLBACK;
+
+-- disallow non-simple subqueries
+SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) FROM mv_base_a a');
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) + 1 FROM mv_base_a a');
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT k FROM mv_base_b LIMIT 1)) AS v');
 
 -- support join subquery in FROM clause
 BEGIN;
@@ -352,10 +358,6 @@ SELECT create_immv('mv_ivm02', 'SELECT i,j FROM mv_base_a WHERE xmin = ''610''')
 SELECT create_immv('mv_ivm03', 'SELECT i,j,xmin::text AS x_min FROM mv_base_a');
 SELECT create_immv('mv_ivm04', 'SELECT i,j,xidsend(xmin) AS x_min FROM mv_base_a');
 
--- contain subquery
-SELECT create_immv('mv_ivm03', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
-SELECT create_immv('mv_ivm04', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
-SELECT create_immv('mv_ivm05', 'SELECT i,j, (SELECT k FROM mv_base_b b WHERE a.i = b.i) FROM mv_base_a a');
 -- contain ORDER BY
 SELECT create_immv('mv_ivm07', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) ORDER BY i,j,k');
 -- contain HAVING
@@ -368,7 +370,6 @@ CREATE VIEW b_view AS SELECT i,k FROM mv_base_b;
 CREATE MATERIALIZED VIEW b_mview AS SELECT i,k FROM mv_base_b;
 SELECT create_immv('mv_ivm07', 'SELECT a.i,a.j FROM mv_base_a a,b_view b WHERE a.i = b.i');
 SELECT create_immv('mv_ivm08', 'SELECT a.i,a.j FROM mv_base_a a,b_mview b WHERE a.i = b.i');
-SELECT create_immv('mv_ivm09', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
 
 -- contain mutable functions
 SELECT create_immv('mv_ivm12', 'SELECT i,j FROM mv_base_a WHERE i = random()::int');
