@@ -2347,7 +2347,7 @@ apply_new_delta(const char *matviewname, const char *deltaname_new,
 	initStringInfo(&querybuf);
 	appendStringInfo(&querybuf,
 					"INSERT INTO %s (%s) SELECT %s FROM ("
-						"SELECT diff.*, generate_series(1, diff.\"__ivm_count__\") "
+						"SELECT diff.*, generate_series(1, diff.\"__ivm_count__\") AS __ivm_generate_series__ "
 						"FROM %s AS diff) AS v",
 					matviewname, target_list->data, target_list->data,
 					deltaname_new);
