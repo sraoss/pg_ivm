@@ -66,6 +66,8 @@ typedef struct
 {
 	bool	has_agg;
 	bool	has_subquery;
+	bool    in_exists_subquery; /* true, if it is in a exists subquery */
+	List    *exists_qual_vars;
 	int		sublevels_up;
 } check_ivm_restriction_context;
 
@@ -261,7 +263,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 				CreateIndexOnIMMV(viewQuery, matviewRel, true);
 
 				/* Create triggers on incremental maintainable materialized view */
-				CreateIvmTriggersOnBaseTables(viewQuery, matviewOid, true);
+				CreateIvmTriggersOnBaseTables(query, matviewOid, true);
 
 				/* Create triggers to prevent IMMV from beeing changed */
 				CreateChangePreventTrigger(matviewOid);
@@ -278,6 +280,11 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
  *
  * count(*) is added for counting distinct tuples in views.
  * Also, additional hidden columns are added for aggregate values.
+ *
+ * EXISTS sublink is rewritten to LATERAL subquery with HAVING
+ * clause to check count(*) > 0. In addition, a counting column
+ * referring to count(*) in this subquery is added to the original
+ * target list.
  */
 Query *
 rewriteQueryForIMMV(Query *query, List *colNames)
@@ -300,6 +307,51 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 
 	rewritten = copyObject(query);
 	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
+
+	/*
+	 * If this query has EXISTS clause, rewrite query and
+	 * add __ivm_exists_count_X__ column.
+	 */
+	if (rewritten->hasSubLinks)
+	{
+		ListCell *lc;
+		RangeTblEntry *rte;
+		int varno = 0;
+
+		/* rewrite EXISTS sublink to LATERAL subquery */
+		rewrite_query_for_exists_subquery(rewritten);
+
+		/* Add counting column referring to count(*) in EXISTS clause */
+		foreach(lc, rewritten->rtable)
+		{
+			char *columnName;
+			int attnum;
+			Node *countCol = NULL;
+			varno++;
+
+			rte = (RangeTblEntry *) lfirst(lc);
+			if (!rte->subquery || !rte->lateral)
+				continue;
+			pstate->p_rtable = rewritten->rtable;
+
+			columnName = getColumnNameStartWith(rte, "__ivm_exists", &attnum);
+			if (columnName == NULL)
+				continue;
+			countCol = (Node *)makeVar(varno, attnum,
+						INT8OID, -1, InvalidOid, 0);
+
+
+			if (countCol != NULL)
+			{
+				tle = makeTargetEntry((Expr *) countCol,
+											list_length(rewritten->targetList) + 1,
+											pstrdup(columnName),
+											false);
+				rewritten->targetList = list_concat(rewritten->targetList, list_make1(tle));
+			}
+		}
+	}
+
 
 	/* group keys must be in targetlist */
 	if (rewritten->groupClause)
@@ -691,7 +743,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 static void
 check_ivm_restriction(Node *node)
 {
-	check_ivm_restriction_context context = {false, false};
+	check_ivm_restriction_context context = {false, false, false, NIL, 0};
 
 	check_ivm_restriction_walker(node, &context);
 }
@@ -841,6 +893,39 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 
 				query_tree_walker(qry, check_ivm_restriction_walker, (void *) context, QTW_IGNORE_RT_SUBQUERIES);
 
+				/* additional restriction checks for exists subquery */
+				if (context->exists_qual_vars != NIL && context->sublevels_up == 0)
+				{
+					ListCell *lc;
+
+					foreach (lc, context->exists_qual_vars)
+					{
+						Var	*var = (Var *) lfirst(lc);
+						ListCell *lc2;
+						bool found = false;
+
+						foreach(lc2, qry->targetList)
+						{
+							TargetEntry	*tle = lfirst(lc2);
+							Var *var2;
+
+							if (!IsA(tle->expr, Var))
+								continue;
+							var2 = (Var *) tle->expr;
+							if (var->varno == var2->varno && var->varattno == var2->varattno)
+							{
+								found = true;
+								break;
+							}
+						}
+						if (!found)
+							ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+									 errhint("targetlist must contain vars that are referred to in EXISTS subquery")));
+					}
+				}
+
 				break;
 			}
 		case T_CommonTableExpr:
@@ -927,12 +1012,33 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				expression_tree_walker(node, check_ivm_restriction_walker, (void *) context);
 				break;
 			}
+		case T_Var:
+			{
+				Var	*variable = (Var *) node;
+				/* If EXISTS subquery refers to vars of the upper query, collect these vars */
+				if (variable->varlevelsup > 0 && context->in_exists_subquery)
+					context->exists_qual_vars = lappend(context->exists_qual_vars, node);
+				break;
+			}
 		case T_SubLink:
 			{
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("unsupported subquery on incrementally maintainable materialized view"),
-						 errhint("Only simple subquery in FROM clause is supported.")));
+				/* Now, EXISTS clause is supported only */
+				SubLink	*sublink = (SubLink *) node;
+				if (sublink->subLinkType != EXISTS_SUBLINK)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("subquery in WHERE clause only supports subquery with EXISTS clause")));
+				if (context->sublevels_up > 0)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("nested subquery is not supported on incrementally maintainable materialized view")));
+
+				context->in_exists_subquery = true;
+				context->sublevels_up++;
+				check_ivm_restriction_walker(sublink->subselect, context);
+				context->sublevels_up--;
+				context->in_exists_subquery = false;
 				break;
 			}
 		default:

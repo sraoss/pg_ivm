@@ -29,6 +29,7 @@
 #include "executor/tstoreReceiver.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
 #include "parser/analyze.h"
 #include "parser/parse_clause.h"
@@ -37,6 +38,7 @@
 #include "parser/parser.h"
 #include "pgstat.h"
 #include "rewrite/rewriteHandler.h"
+#include "rewrite/rewriteManip.h"
 #include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
 #include "tcop/tcopprot.h"
@@ -973,6 +975,10 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		i++;
 	}
 
+	/* Rewrite for the EXISTS clause */
+	if (rewritten->hasSubLinks)
+		rewrite_query_for_exists_subquery(rewritten);
+
 	/* Set all tables in the query to pre-update state */
 	rewritten = rewrite_query_for_preupdate_state(rewritten, entry->tables,
 												  pstate, NIL, matviewOid);
@@ -1034,15 +1040,40 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		foreach(lc2, table->rte_paths)
 		{
 			List	*rte_path = lfirst(lc2);
+			int i;
+			Query *querytree = rewritten;
+			RangeTblEntry  *rte;
 			TupleDesc		tupdesc_old;
 			TupleDesc		tupdesc_new;
 			bool	use_count = false;
 			char   *count_colname = NULL;
 
-			count_colname = pstrdup("__ivm_count__");
+			/* check if the modified table is in EXISTS clause. */
+			for (i = 0; i< list_length(rte_path); i++)
+			{
+				int index =  lfirst_int(list_nth_cell(rte_path, i));
+				rte = (RangeTblEntry *)lfirst(list_nth_cell(querytree->rtable, index - 1));
 
-			if (query->hasAggs || query->distinctClause)
+				if (rte != NULL && rte->rtekind == RTE_SUBQUERY)
+				{
+					querytree = rte->subquery;
+					if (rte->lateral)
+					{
+						int attnum;
+						count_colname = getColumnNameStartWith(rte, "__ivm_exists", &attnum);
+						if (count_colname)
+						{
+							use_count = true;
+						}
+					}
+				}
+			}
+
+			if (count_colname == NULL && (query->hasAggs || query->distinctClause))
+			{
+				count_colname = pstrdup("__ivm_count__");
 				use_count = true;
+			}
 
 			/* calculate delta tables */
 			calc_delta(table, rte_path, rewritten, dest_old, dest_new,
@@ -1486,6 +1517,8 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 	TargetEntry *tle_count;
 	FuncCall *fn;
 	Node *node;
+	int varno = 0;
+	ListCell *tbl_lc;
 
 	/* For aggregate views */
 	if (query->hasAggs)
@@ -1502,6 +1535,34 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 				makeIvmAggColumn(pstate, (Aggref *)tle->expr, tle->resname, &next_resno, &aggs);
 		}
 		query->targetList = list_concat(query->targetList, aggs);
+	}
+
+	/* Add count(*) used for EXISTS clause */
+	foreach(tbl_lc, query->rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *)lfirst(tbl_lc);
+		varno++;
+		if (rte->subquery)
+		{
+			char *columnName;
+			int attnum;
+
+			/* search ivm_exists_count_X__ column in RangeTblEntry */
+			columnName = getColumnNameStartWith(rte, "__ivm_exists", &attnum);
+			if (columnName == NULL)
+				continue;
+
+			node = (Node *)makeVar(varno ,attnum,
+					INT8OID, -1, InvalidOid, 0);
+
+			if (node == NULL)
+				continue;
+			tle_count = makeTargetEntry((Expr *) node,
+										list_length(query->targetList) + 1,
+										pstrdup(columnName),
+										false);
+			query->targetList = lappend(query->targetList, tle_count);
+		}
 	}
 
 	/* Add count(*) for counting distinct tuples in views */
@@ -1524,6 +1585,161 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 	query->hasAggs = true;
 
 	return query;
+}
+
+/*
+ * rewrite_query_for_exists_subquery
+ *
+ * Rewrite EXISTS sublink in WHERE to LATERAL subquery
+ */
+static Query *
+rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
+{
+	/* This can recurse, so check for excessive recursion */
+	check_stack_depth();
+
+	switch (nodeTag(node))
+	{
+		case T_Query:
+			{
+				FromExpr *fromexpr;
+
+				/* get subquery in WHERE clause */
+				fromexpr = (FromExpr *)query->jointree;
+				query = rewrite_exists_subquery_walker(query, fromexpr->quals, count);
+				/* drop subquery in WHERE clause */
+				if (IsA(fromexpr->quals, SubLink))
+					fromexpr->quals = NULL;
+				break;
+			}
+		case T_BoolExpr:
+			{
+				BoolExprType type;
+
+				type = ((BoolExpr *) node)->boolop;
+				switch (type)
+				{
+					ListCell *lc;
+					case AND_EXPR:
+						foreach(lc, ((BoolExpr *)node)->args)
+						{
+							Node *opnode = (Node *)lfirst(lc);
+							query = rewrite_exists_subquery_walker(query, opnode, count);
+							/* overwrite SubLink node if it is contained in AND_EXPR */
+							if (IsA(opnode, SubLink))
+								lfirst(lc) = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
+						}
+						break;
+					case OR_EXPR:
+					case NOT_EXPR:
+						if (checkExprHasSubLink(node))
+							ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+									 errhint("OR or NOT conditions and EXISTS condition are not used together")));
+						break;
+				}
+				break;
+			}
+		case T_SubLink:
+			{
+				char aliasName[NAMEDATALEN];
+				char columnName[NAMEDATALEN];
+				Query *subselect;
+				ParseState *pstate;
+				RangeTblEntry *rte;
+				RangeTblRef *rtr;
+				Alias *alias;
+				Oid opId;
+				ParseNamespaceItem *nsitem;
+
+				TargetEntry *tle_count;
+				FuncCall *fn;
+				Node *fn_node;
+				Expr *opexpr;
+
+				SubLink *sublink = (SubLink *)node;
+				/* raise ERROR if there is non-EXISTS sublink */
+				if (sublink->subLinkType != EXISTS_SUBLINK)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("subquery in WHERE clause only supports subquery with EXISTS clause")));
+
+				subselect = (Query *)sublink->subselect;
+
+				/* raise ERROR if the sublink has CTE */
+				if (subselect->cteList)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("CTE is not supported on incrementally maintainable materialized view")));
+
+				pstate = make_parsestate(NULL);
+				pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
+
+				/*
+				 * convert EXISTS subquery into LATERAL subquery in FROM clause.
+				 */
+
+				snprintf(aliasName, sizeof(aliasName), "__ivm_exists_subquery_%d__", *count);
+				snprintf(columnName, sizeof(columnName), "__ivm_exists_count_%d__", *count);
+
+				/* add COUNT(*) for counting rows that meet exists condition */
+				fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+				fn->agg_star = true;
+				fn_node = ParseFuncOrColumn(pstate, fn->funcname, NIL, NULL, fn, false, -1);
+				tle_count = makeTargetEntry((Expr *) fn_node,
+											list_length(subselect->targetList) + 1,
+											columnName,
+											false);
+				/* add __ivm_exists_count__ column */
+				subselect->targetList = list_concat(subselect->targetList, list_make1(tle_count));
+				subselect->hasAggs = true;
+
+				/* add a sub-query whth LATERAL into from clause */
+				alias = makeAlias(aliasName, NIL);
+				nsitem = addRangeTableEntryForSubquery(pstate, subselect, alias, true, true);
+				rte = nsitem->p_rte;
+				query->rtable = lappend(query->rtable, rte);
+
+				/* assume the new RTE is at the end */
+				rtr = makeNode(RangeTblRef);
+				rtr->rtindex = list_length(query->rtable);
+				((FromExpr *)query->jointree)->fromlist = lappend(((FromExpr *)query->jointree)->fromlist, rtr);
+
+				/*
+				 * EXISTS condition is converted to HAVING count(*) > 0.
+				 * We use make_opcllause() to get int84gt( '>' operator). We might be able to use make_op().
+				 */
+				opId = OpernameGetOprid(list_make1(makeString(">")), INT8OID, INT4OID);
+				opexpr = make_opclause(opId, BOOLOID, false,
+								(Expr *)fn_node,
+								(Expr *)makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(0), false, true),
+								InvalidOid, InvalidOid);
+				fix_opfuncids((Node *) opexpr);
+				query->hasSubLinks = false;
+
+				subselect->havingQual = (Node *)opexpr;
+				(*count)++;
+				break;
+			}
+		default:
+			break;
+	}
+	return query;
+}
+
+Query *
+rewrite_query_for_exists_subquery(Query *query)
+{
+	int count = 0;
+	if (query->hasAggs)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+				 errhint("aggregate function and EXISTS condition are not supported at the same time")));
+
+	return rewrite_exists_subquery_walker(query, (Node *)query, &count);
 }
 
 /*
@@ -2946,6 +3162,32 @@ clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort)
 
 
 	hash_search(mv_trigger_info, (void *) &entry->matview_id, HASH_REMOVE, &found);
+}
+
+/*
+ * getColumnNameStartWith
+ *
+ * Search a column name which starts with the given string from the given RTE,
+ * and return the first found one or NULL if not found.
+ */
+char *
+getColumnNameStartWith(RangeTblEntry *rte, char *str, int *attnum)
+{
+	char *colname;
+	ListCell *lc;
+	Alias *alias = rte->eref;
+
+	(*attnum) = 0;
+	foreach(lc, alias->colnames)
+	{
+		(*attnum)++;
+		if (strncmp(strVal(lfirst(lc)), str, strlen(str)) == 0)
+		{
+			colname = pstrdup(strVal(lfirst(lc)));
+			return colname;
+		}
+	}
+	return NULL;
 }
 
 /*

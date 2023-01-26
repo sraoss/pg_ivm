@@ -662,6 +662,139 @@ SELECT * FROM mv_ri ORDER BY i2;
 (2 rows)
 
 ROLLBACK;
+-- support subquery for using EXISTS()
+BEGIN;
+SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+NOTICE:  could not create an index on immv "mv_ivm_exists_subquery" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           4
+(1 row)
+
+SELECT create_immv('mv_ivm_exists_subquery2', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) AND a.i > 2');
+NOTICE:  could not create an index on immv "mv_ivm_exists_subquery2" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           2
+(1 row)
+
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+ i | j  | __ivm_exists_count_0__ 
+---+----+------------------------
+ 1 | 10 |                      1
+ 2 | 20 |                      1
+ 3 | 30 |                      1
+ 4 | 40 |                      1
+(4 rows)
+
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ i | j  | __ivm_exists_count_0__ 
+---+----+------------------------
+ 3 | 30 |                      1
+ 4 | 40 |                      1
+(2 rows)
+
+INSERT INTO mv_base_a VALUES(1,10),(6,60),(3,30),(3,300);
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 1 |  10 |                      1
+ 1 |  10 |                      1
+ 2 |  20 |                      1
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(7 rows)
+
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(4 rows)
+
+INSERT INTO mv_base_b VALUES(1,101);
+INSERT INTO mv_base_b VALUES(1,111);
+INSERT INTO mv_base_b VALUES(2,102);
+INSERT INTO mv_base_b VALUES(6,106);
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 1 |  10 |                      3
+ 1 |  10 |                      3
+ 2 |  20 |                      2
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+ 6 |  60 |                      1
+(8 rows)
+
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+ 6 |  60 |                      1
+(5 rows)
+
+UPDATE mv_base_a SET i = 1 WHERE j =60;
+UPDATE mv_base_b SET i = 10  WHERE k = 101;
+UPDATE mv_base_b SET k = 1002 WHERE k = 102;
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 1 |  10 |                      1
+ 1 |  10 |                      1
+ 1 |  60 |                      1
+ 2 |  20 |                      2
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(8 rows)
+
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(4 rows)
+
+DELETE FROM mv_base_a WHERE (i,j) = (1,60);
+DELETE FROM mv_base_b WHERE i = 2;
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 1 |  10 |                      1
+ 1 |  10 |                      1
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(6 rows)
+
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ i |  j  | __ivm_exists_count_0__ 
+---+-----+------------------------
+ 3 |  30 |                      1
+ 3 |  30 |                      1
+ 3 | 300 |                      1
+ 4 |  40 |                      1
+(4 rows)
+
+ROLLBACK;
 -- support simple subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
@@ -688,25 +821,28 @@ SELECT * FROM mv_ivm_subquery ORDER BY i,j;
 
 ROLLBACK;
 -- disallow non-simple subqueries
-SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
-ERROR:  unsupported subquery on incrementally maintainable materialized view
-HINT:  Only simple subquery in FROM clause is supported.
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
 ERROR:  aggregate functions in nested query are not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
 ERROR:  DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
-ERROR:  unsupported subquery on incrementally maintainable materialized view
-HINT:  Only simple subquery in FROM clause is supported.
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  subquery in WHERE clause only supports subquery with EXISTS clause
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) FROM mv_base_a a');
-ERROR:  unsupported subquery on incrementally maintainable materialized view
-HINT:  Only simple subquery in FROM clause is supported.
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  subquery in WHERE clause only supports subquery with EXISTS clause
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) + 1 FROM mv_base_a a');
-ERROR:  unsupported subquery on incrementally maintainable materialized view
-HINT:  Only simple subquery in FROM clause is supported.
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  subquery in WHERE clause only supports subquery with EXISTS clause
 SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT k FROM mv_base_b LIMIT 1)) AS v');
-ERROR:  unsupported subquery on incrementally maintainable materialized view
-HINT:  Only simple subquery in FROM clause is supported.
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  subquery in WHERE clause only supports subquery with EXISTS clause
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  targetlist must contain vars that are referred to in EXISTS subquery
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) OR a.i > 2');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  OR or NOT conditions and EXISTS condition are not used together
 -- support join subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
