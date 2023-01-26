@@ -662,10 +662,6 @@ SELECT * FROM mv_ri ORDER BY i2;
 (2 rows)
 
 ROLLBACK;
--- not support subquery for using EXISTS()
-SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
-ERROR:  this query is not allowed on incrementally maintainable materialized view
-HINT:  Only simple subquery is supported
 -- support simple subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
@@ -691,6 +687,26 @@ SELECT * FROM mv_ivm_subquery ORDER BY i,j;
 (6 rows)
 
 ROLLBACK;
+-- disallow non-simple subqueries
+SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+ERROR:  unsupported subquery on incrementally maintainable materialized view
+HINT:  Only simple subquery in FROM clause is supported.
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
+ERROR:  aggregate functions in nested query are not supported on incrementally maintainable materialized view
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
+ERROR:  DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
+ERROR:  unsupported subquery on incrementally maintainable materialized view
+HINT:  Only simple subquery in FROM clause is supported.
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) FROM mv_base_a a');
+ERROR:  unsupported subquery on incrementally maintainable materialized view
+HINT:  Only simple subquery in FROM clause is supported.
+SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) + 1 FROM mv_base_a a');
+ERROR:  unsupported subquery on incrementally maintainable materialized view
+HINT:  Only simple subquery in FROM clause is supported.
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT k FROM mv_base_b LIMIT 1)) AS v');
+ERROR:  unsupported subquery on incrementally maintainable materialized view
+HINT:  Only simple subquery in FROM clause is supported.
 -- support join subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
@@ -914,21 +930,12 @@ SELECT create_immv('mv_ivm03', 'SELECT i,j,xmin::text AS x_min FROM mv_base_a');
 ERROR:  system column is not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm04', 'SELECT i,j,xidsend(xmin) AS x_min FROM mv_base_a');
 ERROR:  system column is not supported on incrementally maintainable materialized view
--- contain subquery
-SELECT create_immv('mv_ivm03', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
-ERROR:  this query is not allowed on incrementally maintainable materialized view
-HINT:  Only simple subquery is supported
-SELECT create_immv('mv_ivm04', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
-ERROR:  DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
-SELECT create_immv('mv_ivm05', 'SELECT i,j, (SELECT k FROM mv_base_b b WHERE a.i = b.i) FROM mv_base_a a');
-ERROR:  this query is not allowed on incrementally maintainable materialized view
-HINT:  subquery is not supported in targetlist
 -- contain ORDER BY
 SELECT create_immv('mv_ivm07', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) ORDER BY i,j,k');
 ERROR:  ORDER BY clause is not supported on incrementally maintainable materialized view
 -- contain HAVING
 SELECT create_immv('mv_ivm08', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i) GROUP BY i,j,k HAVING SUM(i) > 5');
-ERROR:   HAVING clause is not supported on incrementally maintainable materialized view
+ERROR:  HAVING clause is not supported on incrementally maintainable materialized view
 -- contain GROUP BY without aggregate
 SELECT create_immv('mv_ivm08', 'SELECT i,j FROM mv_base_a GROUP BY i,j');
 ERROR:  GROUP BY clause without aggregate is not supported on incrementally maintainable materialized view
@@ -939,8 +946,6 @@ SELECT create_immv('mv_ivm07', 'SELECT a.i,a.j FROM mv_base_a a,b_view b WHERE a
 ERROR:  VIEW or MATERIALIZED VIEW is not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm08', 'SELECT a.i,a.j FROM mv_base_a a,b_mview b WHERE a.i = b.i');
 ERROR:  VIEW or MATERIALIZED VIEW is not supported on incrementally maintainable materialized view
-SELECT create_immv('mv_ivm09', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
-ERROR:  aggregate functions in nested query are not supported on incrementally maintainable materialized view
 -- contain mutable functions
 SELECT create_immv('mv_ivm12', 'SELECT i,j FROM mv_base_a WHERE i = random()::int');
 ERROR:  mutable function is not supported on incrementally maintainable materialized view
