@@ -749,7 +749,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				if (qry->hasRecursive)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("recursive CTE is not supported on incrementally maintainable materialized view")));
+							 errmsg("recursive query is not supported on incrementally maintainable materialized view")));
 
 				/* system column restrictions */
 				vars = pull_vars_of_level((Node *) qry, 0);
@@ -843,7 +843,21 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				if (isIvmName(cte->ctename))
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("CTE name %s is not supported on incrementally maintainable materialized view", cte->ctename)));
+							 errmsg("WITH query name %s is not supported on incrementally maintainable materialized view", cte->ctename)));
+
+				/* 
+				 * When a table in a unreferenced CTE is TRUNCATEd, the contents of the
+				 * IMMV is not affected so it must not be truncated. For confirming it
+				 * at the maintenance time, we have to check if the modified table used
+				 * in a CTE is actually referenced. Although it would be possible, we
+				 * just disallow to create such IMMVs for now since such unreferenced
+				 * CTE is useless unless it doesn't contain modifying commands, that is
+				 * already prohibited.
+				 */
+				if (cte->cterefcount == 0)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("Ureferenced WITH query is not supported on incrementally maintainable materialized view")));
 
 				context->sublevels_up++;
 				check_ivm_restriction_walker(cte->ctequery, (void *) context);
