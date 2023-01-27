@@ -466,6 +466,13 @@ CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid, bool is_create)
 	Index	first_rtindex = is_create ? 1 : PRS2_NEW_VARNO + 1;
 	RangeTblEntry *rte;
 
+	/*
+	 * is_create must be true in pg_ivm because the view definition doesn't
+	 * contain NEW/OLD RTE.
+	 * XXX: This argument should be removed?
+	 */
+	Assert(is_create);
+
 	/* Immediately return if we don't have any base tables. */
 	if (list_length(qry->rtable) < first_rtindex)
 		return;
@@ -1094,6 +1101,13 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 	List	   *indexoidlist = RelationGetIndexList(matviewRel);
 	ListCell   *indexoidscan;
 
+
+	/*
+	 * is_create must be true in pg_ivm because the view definition doesn't
+	 * contain NEW/OLD RTE.
+	 * XXX: This argument should be removed?
+	 */
+	Assert(is_create);
 
 	/*
 	 * For aggregate without GROUP BY, we do not need to create an index

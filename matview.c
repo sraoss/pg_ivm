@@ -447,10 +447,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 		pgstat_count_heap_insert(matviewRel, processed);
 
 	if (!skipData && !oldPopulated)
-	{
 		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid, true);
-		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid, false);
-	}
 
 	table_close(matviewRel, NoLock);
 
