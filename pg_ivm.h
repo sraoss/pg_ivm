@@ -15,6 +15,7 @@
 #include "catalog/objectaddress.h"
 #include "fmgr.h"
 #include "nodes/params.h"
+#include "nodes/pathnodes.h"
 #include "parser/parse_node.h"
 #include "tcop/dest.h"
 #include "utils/queryenvironment.h"
@@ -58,5 +59,8 @@ extern bool isIvmName(const char *s);
 /* ruleutils.c */
 
 extern char *pg_ivm_get_viewdef(Relation immvrel, bool pretty);
+
+/* subselect.c */
+extern void inline_cte(PlannerInfo *root, CommonTableExpr *cte);
 
 #endif

@@ -233,7 +233,6 @@ SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT 
 INSERT INTO mv_base_a VALUES(2,20);
 INSERT INTO mv_base_b VALUES(3,300);
 SELECT * FROM mv_ivm_subquery ORDER BY i,j;
-
 ROLLBACK;
 
 -- disallow non-simple subqueries
@@ -254,8 +253,108 @@ WITH
  bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
 SELECT;
 SELECT * FROM mv_ivm_join_subquery ORDER BY i,j,k;
-
 ROLLBACK;
+BEGIN;
+
+-- nested subquery
+SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN (SELECT * FROM mv_base_a) a USING(i)) tmp');
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+SELECT * FROM mv_ivm_join_subquery ORDER BY i,j,k;
+ROLLBACK;
+
+-- support simple CTE
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM mv_base_b) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'SELECT * FROM (WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH b AS ( SELECT * FROM (SELECT * FROM mv_base_b) b2) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
+INSERT INTO mv_base_a VALUES(2,20);
+INSERT INTO mv_base_b VALUES(3,300);
+SELECT * FROM mv_cte ORDER BY i,j;
+ROLLBACK;
+
+BEGIN;
+SELECT create_immv('mv_cte',
+    'WITH x AS ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) SELECT * FROM x');
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+SELECT * FROM mv_cte ORDER BY i,j,k;
+ROLLBACK;
+
+-- nested CTE 
+BEGIN;
+SELECT create_immv('mv_ivm_nested_cte', 'WITH v AS ( WITH a AS (SELECT * FROM mv_base_a) SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN a USING(i)) SELECT * FROM v');
+WITH
+ ai AS (INSERT INTO mv_base_a VALUES (1,11),(2,22) RETURNING 0),
+ bi AS (INSERT INTO mv_base_b VALUES (1,111),(3,133) RETURNING 0),
+ bd AS (DELETE FROM mv_base_b WHERE i = 4 RETURNING 0)
+SELECT;
+SELECT * FROM mv_ivm_nested_cte ORDER BY i,j,k;
+ROLLBACK;
+
+-- Multiply-referenced CTE
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (1, 10), (2, 20), (3, 30);
+SELECT create_immv('mv_cte_multi(v1, v2)',
+ 'WITH t AS (SELECT * FROM base_t) SELECT t1.v, t2.v FROM t AS t1 JOIN t AS t2 ON t1.i = t2.i');
+SELECT * FROM mv_cte_multi ORDER BY v1;
+INSERT INTO base_t VALUES (4,40);
+DELETE FROM base_t WHERE i = 1;
+UPDATE base_t SET v = v*10 WHERE i=2;
+SELECT * FROM mv_cte_multi ORDER BY v1;
+WITH
+ ins_t1 AS (INSERT INTO base_t VALUES (5,50) RETURNING 1),
+ ins_t2 AS (INSERT INTO base_t VALUES (6,60) RETURNING 1),
+ upd_t AS (UPDATE base_t SET v = v + 100  RETURNING 1),
+ dlt_t AS (DELETE FROM base_t WHERE i IN (4,5)  RETURNING 1)
+SELECT NULL;
+SELECT * FROM mv_cte_multi ORDER BY v1;
+ROLLBACK;
+
+--- disallow not-simple CTE
+SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT DISTINCT i FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+
+-- unreferenced CTE
+SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT * FROM mv_base_b) SELECT * FROM mv_base_a a');
 
 -- views including NULL
 BEGIN;
@@ -347,10 +446,6 @@ ROLLBACK;
 -- outer join is not supported
 SELECT create_immv('mv(a,b)',
     'SELECT a.i, b.i FROM mv_base_a a LEFT JOIN mv_base_b b ON a.i=b.i');
-
--- CTE is not supported
-SELECT create_immv('mv',
-    'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i;');
 
 -- contain system column
 SELECT create_immv('mv_ivm01', 'SELECT i,j,xmin FROM mv_base_a');

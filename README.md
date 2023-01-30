@@ -188,7 +188,7 @@ Time: 3224.741 ms (00:03.225)
 
 ## Supported View Definitions and Restriction
 
-Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some built-in aggregate functions, and simple sub-queries in `FROM` clause. Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, CTEs, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
+Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some built-in aggregate functions, simple sub-queries in `FROM` clause, and simple CTE (`WITH` query). Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
 
 The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
@@ -223,6 +223,16 @@ Simple subqueries in `FROM` clause are supported.
 Subqueries can be used only in `FROM` clause. Subqueries in target list or `WHERE` clause are not supported.
 
 Subqueries containing an aggregate function or `DISTINCT` are not supported.
+
+### CTE
+
+Simple CTEs (`WITH` queries) are supported.
+
+#### Restrictions on Subqueries
+
+`WITH` queries containing an aggregate function or `DISTINCT` are not supported.
+
+Recursive queries (`WITH RECURSIVE`) are not allowed. Unreferenced CTEs are not allowed either, that is, a CTE must be referenced at least once in the view definition query.
 
 ### DISTINCT
 
