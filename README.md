@@ -228,7 +228,7 @@ Subqueries containing an aggregate function or `DISTINCT` are not supported.
 
 Simple CTEs (`WITH` queries) are supported.
 
-#### Restrictions on Subqueries
+#### Restrictions on CTEs
 
 `WITH` queries containing an aggregate function or `DISTINCT` are not supported.
 
