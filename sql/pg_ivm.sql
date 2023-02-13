@@ -318,7 +318,7 @@ SELECT;
 SELECT * FROM mv_cte ORDER BY i,j,k;
 ROLLBACK;
 
--- nested CTE 
+-- nested CTE
 BEGIN;
 SELECT create_immv('mv_ivm_nested_cte', 'WITH v AS ( WITH a AS (SELECT * FROM mv_base_a) SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN a USING(i)) SELECT * FROM v');
 WITH
@@ -522,13 +522,14 @@ SELECT create_immv('mv_ivm_only_values1', 'values(1)');
 SELECT create_immv('mv_ivm_only_values2',  'SELECT * FROM (values(1)) AS tmp');
 
 
--- base table which has row level security
+-- views containing base tables with Row Level Security
 DROP USER IF EXISTS ivm_admin;
 DROP USER IF EXISTS ivm_user;
 CREATE USER ivm_admin;
 CREATE USER ivm_user;
-SET SESSION AUTHORIZATION ivm_admin;
 
+--- create a table with RLS
+SET SESSION AUTHORIZATION ivm_admin;
 CREATE TABLE rls_tbl(id int, data text, owner name);
 INSERT INTO rls_tbl VALUES
   (1,'foo','ivm_user'),
@@ -538,23 +539,39 @@ INSERT INTO num_tbl VALUES
   (1,'one'),
   (2,'two'),
   (3,'three'),
-  (4,'four');
+  (4,'four'),
+  (5,'five'),
+  (6,'six');
+
+--- Users can access only their own rows
 CREATE POLICY rls_tbl_policy ON rls_tbl FOR SELECT TO PUBLIC USING(owner = current_user);
-CREATE POLICY rls_tbl_policy2 ON rls_tbl FOR INSERT TO PUBLIC WITH CHECK(current_user LIKE 'ivm_%');
 ALTER TABLE rls_tbl ENABLE ROW LEVEL SECURITY;
 GRANT ALL on rls_tbl TO PUBLIC;
 GRANT ALL on num_tbl TO PUBLIC;
 
+--- create a view owned by ivm_user
 SET SESSION AUTHORIZATION ivm_user;
-
 SELECT create_immv('ivm_rls', 'SELECT * FROM rls_tbl');
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
+RESET SESSION AUTHORIZATION;
+
+--- inserts rows owned by different users
 INSERT INTO rls_tbl VALUES
   (3,'baz','ivm_user'),
   (4,'qux','postgres');
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
-SELECT create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 
+--- combination of diffent kinds of commands
+WITH
+ i AS (INSERT INTO rls_tbl VALUES(5,'quux','postgres'), (6,'corge','ivm_user')),
+ u AS (UPDATE rls_tbl SET owner = 'postgres' WHERE id = 1),
+ u2 AS (UPDATE rls_tbl SET owner = 'ivm_user' WHERE id = 2)
+SELECT;
+SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
+
+---
+SET SESSION AUTHORIZATION ivm_user;
+SELECT create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 RESET SESSION AUTHORIZATION;
 
 WITH
