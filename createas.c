@@ -343,9 +343,9 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 	if (rewritten->distinctClause || rewritten->hasAggs)
 	{
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-		fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+		fn = makeFuncCall(SystemFuncName("count"), NIL, COERCE_EXPLICIT_CALL, -1);
 #else
-		fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+		fn = makeFuncCall(SystemFuncName("count"), NIL, -1);
 #endif
 		fn->agg_star = true;
 
@@ -401,9 +401,9 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 	if (strcmp(aggname, "count") != 0)
 	{
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-		fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+		fn = makeFuncCall(SystemFuncName("count"), NIL, COERCE_EXPLICIT_CALL, -1);
 #else
-		fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+		fn = makeFuncCall(SystemFuncName("count"), NIL, -1);
 #endif
 
 		/* Make a Func with a dummy arg, and then override this by the original agg's args. */
@@ -437,9 +437,9 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 			ReleaseSysCache(type);
 		}
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-		fn = makeFuncCall(list_make1(makeString("sum")), NIL, COERCE_EXPLICIT_CALL, -1);
+		fn = makeFuncCall(SystemFuncName("sum"), NIL, COERCE_EXPLICIT_CALL, -1);
 #else
-		fn = makeFuncCall(list_make1(makeString("sum")), NIL, -1);
+		fn = makeFuncCall(SystemFuncName("sum"), NIL, -1);
 #endif
 
 		/* Make a Func with dummy args, and then override this by the original agg's args. */

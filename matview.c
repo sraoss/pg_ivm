@@ -1348,7 +1348,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	initStringInfo(&str);
 	appendStringInfo(&str,
 		"SELECT t.* FROM %s t"
-		" WHERE ivm_visible_in_prestate(t.tableoid, t.ctid ,%d::oid)",
+		" WHERE pg_catalog.ivm_visible_in_prestate(t.tableoid, t.ctid ,%d::pg_catalog.oid)",
 			relname, matviewid);
 
 	for (i = 0; i < list_length(table->old_tuplestores); i++)
@@ -1492,9 +1492,9 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 
 	/* Add count(*) for counting distinct tuples in views */
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-	fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+	fn = makeFuncCall(SystemFuncName("count"), NIL, COERCE_EXPLICIT_CALL, -1);
 #else
-	fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+	fn = makeFuncCall(SystemFuncName("count"), NIL, -1);
 #endif
 	fn->agg_star = true;
 	if (!query->groupClause && !query->hasAggs)
@@ -1696,7 +1696,7 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 			/* avg */
 			else if (!strcmp(aggname, "avg"))
 				append_set_clause_for_avg(resname, aggs_set_old, aggs_set_new, aggs_list_buf,
-										  format_type_be(aggref->aggtype));
+										  format_type_be_qualified(aggref->aggtype));
 
 			/* min/max */
 			else if (!strcmp(aggname, "min") || !strcmp(aggname, "max"))
@@ -2245,7 +2245,7 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 	initStringInfo(&querybuf);
 	appendStringInfo(&querybuf,
 	"DELETE FROM %s WHERE ctid IN ("
-		"SELECT tid FROM (SELECT row_number() over (partition by %s) AS \"__ivm_row_number__\","
+		"SELECT tid FROM (SELECT pg_catalog.row_number() over (partition by %s) AS \"__ivm_row_number__\","
 								  "mv.ctid AS tid,"
 								  "diff.\"__ivm_count__\""
 						 "FROM %s AS mv, %s AS diff "
@@ -2344,7 +2344,7 @@ apply_new_delta(const char *matviewname, const char *deltaname_new,
 	initStringInfo(&querybuf);
 	appendStringInfo(&querybuf,
 					"INSERT INTO %s (%s) SELECT %s FROM ("
-						"SELECT diff.*, generate_series(1, diff.\"__ivm_count__\") AS __ivm_generate_series__ "
+						"SELECT diff.*, pg_catalog.generate_series(1, diff.\"__ivm_count__\") AS __ivm_generate_series__ "
 						"FROM %s AS diff) AS v",
 					matviewname, target_list->data, target_list->data,
 					deltaname_new);
@@ -2743,7 +2743,7 @@ generate_equal(StringInfo querybuf, Oid opttype,
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_FUNCTION),
 				 errmsg("could not identify an equality operator for type %s",
-						format_type_be(opttype))));
+						format_type_be_qualified(opttype))));
 
 	generate_operator_clause(querybuf,
 							 leftop, opttype,
