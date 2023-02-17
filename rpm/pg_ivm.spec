@@ -10,7 +10,7 @@
 
 Summary:	PostgreSQL-based distributed RDBMS
 Name:		%{sname}_%{pgmajorversion}
-Version:	1.5
+Version:	1.5.1
 Release:	1%{dist}
 License:    BSD
 Vendor:     IVM Development Group
@@ -55,8 +55,10 @@ PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot
 %endif
 
 %changelog
+* Thu Mar 2 2023 - Yugo Nagata <nagata@sraoss.co.jp> 1.5.1-1
+- Update to 1.5.1
 * Mon Jun 30 2023 - Yugo Nagata <nagata@sraoss.co.jp> 1.5-1
-- Update to 1.4
+- Update to 1.5
 * Fri Dec 16 2022 - Yugo Nagata <nagata@sraoss.co.jp> 1.4-1
 - Update to 1.4
 * Fri Sep 30 2022 - Yugo Nagata <nagata@sraoss.co.jp> 1.3-1
