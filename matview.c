@@ -78,6 +78,9 @@ typedef struct MV_QueryHashEntry
 {
 	MV_QueryKey key;
 	SPIPlanPtr	plan;
+	OverrideSearchPath *search_path;	/* search_path used for parsing
+										 * and planning */
+
 } MV_QueryHashEntry;
 
 /*
@@ -2807,18 +2810,27 @@ mv_FetchPreparedPlan(MV_QueryKey *key)
 	 *
 	 * CAUTION: this check is only trustworthy if the caller has already
 	 * locked both materialized views and base tables.
+	 *
+	 * Also, check whether the search_path is still the same as when we made it.
+	 * If it isn't, we need to rebuild the query text because the result of
+	 * pg_ivm_get_viewdef() will change.
 	 */
 	plan = entry->plan;
-	if (plan && SPI_plan_is_valid(plan))
+	if (plan && SPI_plan_is_valid(plan) &&
+		OverrideSearchPathMatchesCurrent(entry->search_path))
 		return plan;
 
 	/*
 	 * Otherwise we might as well flush the cached plan now, to free a little
 	 * memory space before we make a new one.
 	 */
-	entry->plan = NULL;
 	if (plan)
 		SPI_freeplan(plan);
+	if (entry->search_path)
+		pfree(entry->search_path);
+
+	entry->plan = NULL;
+	entry->search_path = NULL;
 
 	return NULL;
 }
@@ -2849,6 +2861,7 @@ mv_HashPreparedPlan(MV_QueryKey *key, SPIPlanPtr plan)
 											  HASH_ENTER, &found);
 	Assert(!found || entry->plan == NULL);
 	entry->plan = plan;
+	entry->search_path = GetOverrideSearchPath(TopMemoryContext);
 }
 
 /*
