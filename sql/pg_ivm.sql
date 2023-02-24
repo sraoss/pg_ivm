@@ -150,6 +150,24 @@ DELETE FROM mv_base_a;
 SELECT * FROM mv_ivm_min_max;
 ROLLBACK;
 
+-- Test MIN/MAX after search_path change
+BEGIN;
+SELECT create_immv('mv_ivm_min', 'SELECT MIN(j) FROM mv_base_a');
+SELECT * FROM mv_ivm_min ORDER BY 1,2,3;
+
+CREATE SCHEMA myschema;
+GRANT ALL ON SCHEMA myschema TO public;
+CREATE TABLE myschema.mv_base_a (j int);
+INSERT INTO myschema.mv_base_a VALUES (1);
+
+DELETE FROM mv_base_a WHERE (i,j) = (1,10);
+SELECT * FROM mv_ivm_min ORDER BY 1,2,3;
+
+SET search_path TO myschema,public,pg_catalog;
+DELETE FROM public.mv_base_a WHERE (i,j) = (2,20);
+SELECT * FROM mv_ivm_min ORDER BY 1,2,3;
+ROLLBACK;
+
 -- aggregate views with column names specified
 BEGIN;
 SELECT create_immv('mv_ivm_agg(a)', 'SELECT i, SUM(j) FROM mv_base_a GROUP BY i');
