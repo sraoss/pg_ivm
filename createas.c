@@ -166,7 +166,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		check_ivm_restriction((Node *) query);
 
 		/* For IMMV, we need to rewrite matview query */
-		query = rewriteQueryForIMMV(query, into->colNames);
+		query = rewriteQueryForIMMV(viewQuery, into->colNames);
 
 	}
 
@@ -337,9 +337,8 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 			columnName = getColumnNameStartWith(rte, "__ivm_exists", &attnum);
 			if (columnName == NULL)
 				continue;
-			countCol = (Node *)makeVar(varno, attnum,
+			countCol = (Node *) makeVar(varno, attnum,
 						INT8OID, -1, InvalidOid, 0);
-
 
 			if (countCol != NULL)
 			{
@@ -893,7 +892,12 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 
 				query_tree_walker(qry, check_ivm_restriction_walker, (void *) context, QTW_IGNORE_RT_SUBQUERIES);
 
-				/* additional restriction checks for exists subquery */
+				/*
+				 * additional restriction checks for exists subquery
+				 *
+				 * When contain EXISTS clauses, and it has a column refernces
+				 * a table outside, its column must be included by target list.
+				 */
 				if (context->exists_qual_vars != NIL && context->sublevels_up == 0)
 				{
 					ListCell *lc;
@@ -1015,7 +1019,9 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 		case T_Var:
 			{
 				Var	*variable = (Var *) node;
-				/* If EXISTS subquery refers to vars of the upper query, collect these vars */
+				/* Currently, only EXISTS clause is allowed here.
+				 * If EXISTS subquery refers to vars of the upper query, collect these vars.
+				 */
 				if (variable->varlevelsup > 0 && context->in_exists_subquery)
 					context->exists_qual_vars = lappend(context->exists_qual_vars, node);
 				break;
@@ -1023,6 +1029,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 		case T_SubLink:
 			{
 				/* Now, EXISTS clause is supported only */
+				Query *subselect;
 				SubLink	*sublink = (SubLink *) node;
 				if (sublink->subLinkType != EXISTS_SUBLINK)
 					ereport(ERROR,
@@ -1033,6 +1040,13 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("nested subquery is not supported on incrementally maintainable materialized view")));
+
+				subselect = (Query *)sublink->subselect;
+				/* raise ERROR if the sublink has CTE */
+				if (subselect->cteList)
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("CTE in EXIST clause is not supported on incrementally maintainable materialized view")));
 
 				context->in_exists_subquery = true;
 				context->sublevels_up++;

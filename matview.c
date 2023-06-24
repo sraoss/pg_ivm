@@ -1623,9 +1623,14 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 					case AND_EXPR:
 						foreach(lc, ((BoolExpr *)node)->args)
 						{
+							/* If simple EXISTS subquery is used, rewrite LATERAL subquery */
 							Node *opnode = (Node *)lfirst(lc);
 							query = rewrite_exists_subquery_walker(query, opnode, count);
-							/* overwrite SubLink node if it is contained in AND_EXPR */
+							/*
+							 * overwrite SubLink node to true condition if it is contained in AND_EXPR.
+							 * EXISTS clause have already overwritten to LATERAL, so original EXISTS clause
+							 * is not necessory.
+							 */
 							if (IsA(opnode, SubLink))
 								lfirst(lc) = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
 						}
@@ -1659,20 +1664,7 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				Expr *opexpr;
 
 				SubLink *sublink = (SubLink *)node;
-				/* raise ERROR if there is non-EXISTS sublink */
-				if (sublink->subLinkType != EXISTS_SUBLINK)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
-							 errhint("subquery in WHERE clause only supports subquery with EXISTS clause")));
-
 				subselect = (Query *)sublink->subselect;
-
-				/* raise ERROR if the sublink has CTE */
-				if (subselect->cteList)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("CTE is not supported on incrementally maintainable materialized view")));
 
 				pstate = make_parsestate(NULL);
 				pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
@@ -1685,7 +1677,11 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				snprintf(columnName, sizeof(columnName), "__ivm_exists_count_%d__", *count);
 
 				/* add COUNT(*) for counting rows that meet exists condition */
-				fn = makeFuncCall(list_make1(makeString("count")), NIL, COERCE_EXPLICIT_CALL, -1);
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+				fn = makeFuncCall(SystemFuncName("count"), NIL, COERCE_EXPLICIT_CALL, -1);
+#else
+				fn = makeFuncCall(SystemFuncName("count"), NIL, -1);
+#endif
 				fn->agg_star = true;
 				fn_node = ParseFuncOrColumn(pstate, fn->funcname, NIL, NULL, fn, false, -1);
 				tle_count = makeTargetEntry((Expr *) fn_node,
@@ -1711,7 +1707,7 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				 * EXISTS condition is converted to HAVING count(*) > 0.
 				 * We use make_opcllause() to get int84gt( '>' operator). We might be able to use make_op().
 				 */
-				opId = OpernameGetOprid(list_make1(makeString(">")), INT8OID, INT4OID);
+				opId = OpernameGetOprid(list_make2(makeString("pg_catalog"), makeString(">")), INT8OID, INT4OID);
 				opexpr = make_opclause(opId, BOOLOID, false,
 								(Expr *)fn_node,
 								(Expr *)makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(0), false, true),

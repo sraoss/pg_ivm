@@ -1160,6 +1160,8 @@ SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT i, COUNT(*) FROM mv_base_b 
 ERROR:  aggregate functions in nested query are not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT DISTINCT i FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
 ERROR:  DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
+SELECT create_immv('mv_cte_fail', 'WITH a AS (SELECT i, j FROM mv_base_a) SELECT a.i,a.j FROM a WHERE EXISTS(WITH b AS (SELECT i FROM mv_base_b) SELECT 1 FROM b WHERE a.i = b.i)');
+ERROR:  CTE in EXIST clause is not supported on incrementally maintainable materialized view
 -- unreferenced CTE
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT * FROM mv_base_b) SELECT * FROM mv_base_a a');
 ERROR:  Ureferenced WITH query is not supported on incrementally maintainable materialized view
