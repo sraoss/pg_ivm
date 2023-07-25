@@ -270,6 +270,7 @@ SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMI
 SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT k FROM mv_base_b LIMIT 1)) AS v');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) OR a.i > 2');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_a a2 WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a2.i = b.i))');
 
 -- support join subquery in FROM clause
 BEGIN;
@@ -379,6 +380,7 @@ ROLLBACK;
 --- disallow not-simple CTE
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT DISTINCT i FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+SELECT create_immv('mv_cte_fail', 'WITH a AS (SELECT i, j FROM mv_base_a) SELECT a.i,a.j FROM a WHERE EXISTS(WITH b AS (SELECT i FROM mv_base_b) SELECT 1 FROM b WHERE a.i = b.i)');
 
 -- unreferenced CTE
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT * FROM mv_base_b) SELECT * FROM mv_base_a a');

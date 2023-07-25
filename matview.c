@@ -1587,11 +1587,6 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 	return query;
 }
 
-/*
- * rewrite_query_for_exists_subquery
- *
- * Rewrite EXISTS sublink in WHERE to LATERAL subquery
- */
 static Query *
 rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 {
@@ -1725,6 +1720,21 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 	return query;
 }
 
+/*
+ * rewrite_query_for_exists_subquery
+ *
+ * Rewrite EXISTS sublink in WHERE to LATERAL subquery
+ * For example, rewrite
+ *   SELECT t1.* FROM t1
+ *   WHERE EXISTS(SELECT 1 FROM t2 WHERE t1.key = t2.key)
+ * to
+ *   SELECT t1.*, ex.__ivm_exists_count_0__
+ *   FROM t1, LATERAL(
+ *     SELECT 1, COUNT(*) AS __ivm_exists_count_0__
+ *     FROM t2
+ *     WHERE t1.key = t2.key
+ *     HAVING __ivm_exists_count_0__ > 0) AS ex
+ */
 Query *
 rewrite_query_for_exists_subquery(Query *query)
 {

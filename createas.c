@@ -895,8 +895,9 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				/*
 				 * additional restriction checks for exists subquery
 				 *
-				 * When contain EXISTS clauses, and it has a column refernces
-				 * a table outside, its column must be included by target list.
+				 * If the query has any EXISTS clauses and columns in them refer to
+				 * columns in tables in the output query, those columns must be
+				 * included in the target list.
 				 */
 				if (context->exists_qual_vars != NIL && context->sublevels_up == 0)
 				{
@@ -1019,7 +1020,8 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 		case T_Var:
 			{
 				Var	*variable = (Var *) node;
-				/* Currently, only EXISTS clause is allowed here.
+				/*
+				 * Currently, only EXISTS clause is allowed here.
 				 * If EXISTS subquery refers to vars of the upper query, collect these vars.
 				 */
 				if (variable->varlevelsup > 0 && context->in_exists_subquery)
@@ -1028,18 +1030,18 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 			}
 		case T_SubLink:
 			{
-				/* Now, EXISTS clause is supported only */
+				/* Currently, EXISTS clause is supported only */
 				Query *subselect;
 				SubLink	*sublink = (SubLink *) node;
 				if (sublink->subLinkType != EXISTS_SUBLINK)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
-							 errhint("subquery in WHERE clause only supports subquery with EXISTS clause")));
+							 errhint("sublink only supports subquery with EXISTS clause in WHERE clause")));
 				if (context->sublevels_up > 0)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("nested subquery is not supported on incrementally maintainable materialized view")));
+							 errmsg("nested sublink is not supported on incrementally maintainable materialized view")));
 
 				subselect = (Query *)sublink->subselect;
 				/* raise ERROR if the sublink has CTE */
