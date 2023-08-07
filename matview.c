@@ -1049,10 +1049,10 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 			char   *count_colname = NULL;
 
 			/* check if the modified table is in EXISTS clause. */
-			for (i = 0; i< list_length(rte_path); i++)
+			for (i = 0; i < list_length(rte_path); i++)
 			{
 				int index =  lfirst_int(list_nth_cell(rte_path, i));
-				rte = (RangeTblEntry *)lfirst(list_nth_cell(querytree->rtable, index - 1));
+				rte = (RangeTblEntry *) lfirst(list_nth_cell(querytree->rtable, index - 1));
 
 				if (rte != NULL && rte->rtekind == RTE_SUBQUERY)
 				{
@@ -1540,7 +1540,7 @@ rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate)
 	/* Add count(*) used for EXISTS clause */
 	foreach(tbl_lc, query->rtable)
 	{
-		RangeTblEntry *rte = (RangeTblEntry *)lfirst(tbl_lc);
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(tbl_lc);
 		varno++;
 		if (rte->subquery)
 		{
@@ -1600,11 +1600,14 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				FromExpr *fromexpr;
 
 				/* get subquery in WHERE clause */
-				fromexpr = (FromExpr *)query->jointree;
-				query = rewrite_exists_subquery_walker(query, fromexpr->quals, count);
-				/* drop subquery in WHERE clause */
-				if (IsA(fromexpr->quals, SubLink))
-					fromexpr->quals = NULL;
+				fromexpr = (FromExpr *) query->jointree;
+				if (fromexpr->quals != NULL)
+				{
+					query = rewrite_exists_subquery_walker(query, fromexpr->quals, count);
+					/* drop subquery in WHERE clause */
+					if (IsA(fromexpr->quals, SubLink))
+						fromexpr->quals = NULL;
+				}
 				break;
 			}
 		case T_BoolExpr:

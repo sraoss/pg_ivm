@@ -262,7 +262,11 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 				/* Create an index on incremental maintainable materialized view, if possible */
 				CreateIndexOnIMMV(viewQuery, matviewRel, true);
 
-				/* Create triggers on incremental maintainable materialized view */
+				/*
+				 * Create triggers on incremental maintainable materialized view
+				 * This argument should use 'query'. This needs to use a rewritten query,
+				 * because a sublink in jointree is not supported by this function.
+				 */
 				CreateIvmTriggersOnBaseTables(query, matviewOid, true);
 
 				/* Create triggers to prevent IMMV from beeing changed */
