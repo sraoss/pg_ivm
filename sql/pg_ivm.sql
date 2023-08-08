@@ -271,6 +271,7 @@ SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT 
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) OR a.i > 2');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_a a2 WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a2.i = b.i))');
+SELECT create_immv('mv_ivm_subquery', 'SELECT EXISTS(SELECT 1 from mv_base_b) FROM mv_base_a a');
 
 -- support join subquery in FROM clause
 BEGIN;

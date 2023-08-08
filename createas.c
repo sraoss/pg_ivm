@@ -968,6 +968,12 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 		case T_TargetEntry:
 			{
 				TargetEntry *tle = (TargetEntry *)node;
+				if (IsA(tle->expr, SubLink))
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("sublink only supports subquery with EXISTS clause in WHERE clause")));
+
 				if (isIvmName(tle->resname))
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
