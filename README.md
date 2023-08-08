@@ -220,8 +220,9 @@ Simple subqueries in `FROM` clause and EXISTS subqueries in 'WHERE' clause are s
 
 #### Restrictions on Subqueries
 
-Subqueries using EXISTS and simple subqueries in FROM clause are supported. EXISTS subqueries with condition other than 'AND' and Subqueries in targetlist are not supported.
+Subqueries using EXISTS and simple subqueries in FROM clause are supported. EXISTS subqueries with condition other than 'AND' and Subqueries in targetlist are not supported. EXISTS subquery is supported only in WHERE but not in the targetlist.
 
+If EXISTS contains columns that refer to columns in tables in the outer query, such columns must be included in the targetlist.
 Subqueries containing an aggregate function or `DISTINCT` are not supported.
 
 ### CTE
