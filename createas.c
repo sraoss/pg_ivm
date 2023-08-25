@@ -66,7 +66,8 @@ typedef struct
 {
 	bool	has_agg;
 	bool	has_subquery;
-	bool    in_exists_subquery; /* true, if it is in a exists subquery */
+	bool    in_exists_subquery;	/* true, if it is in a exists subquery */
+	bool	in_jointree;		/* true, if it is in a join tree */
 	List    *exists_qual_vars;
 	int		sublevels_up;
 } check_ivm_restriction_context;
@@ -746,7 +747,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 static void
 check_ivm_restriction(Node *node)
 {
-	check_ivm_restriction_context context = {false, false, false, NIL, 0};
+	check_ivm_restriction_context context = {false, false, false, false, NIL, 0};
 
 	check_ivm_restriction_walker(node, &context);
 }
@@ -968,11 +969,6 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 		case T_TargetEntry:
 			{
 				TargetEntry *tle = (TargetEntry *)node;
-				if (IsA(tle->expr, SubLink))
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
-							 errhint("sublink only supports subquery with EXISTS clause in WHERE clause")));
 
 				if (isIvmName(tle->resname))
 						ereport(ERROR,
@@ -985,6 +981,16 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 
 				expression_tree_walker(node, check_ivm_restriction_walker, (void *) context);
 				break;
+			}
+                case T_FromExpr:
+                        {
+                                FromExpr   *from = (FromExpr *) node;
+
+				check_ivm_restriction_walker((Node *)from->fromlist, context);
+				context->in_jointree = true;
+				check_ivm_restriction_walker(from->quals, context);
+				context->in_jointree = false;
+			break;
 			}
 		case T_JoinExpr:
 			{
@@ -1043,7 +1049,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				/* Currently, EXISTS clause is supported only */
 				Query *subselect;
 				SubLink	*sublink = (SubLink *) node;
-				if (sublink->subLinkType != EXISTS_SUBLINK)
+				if (!context->in_jointree || sublink->subLinkType != EXISTS_SUBLINK)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("this query is not allowed on incrementally maintainable materialized view"),

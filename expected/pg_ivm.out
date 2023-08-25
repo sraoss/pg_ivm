@@ -848,6 +848,12 @@ ERROR:  nested sublink is not supported on incrementally maintainable materializ
 SELECT create_immv('mv_ivm_subquery', 'SELECT EXISTS(SELECT 1 from mv_base_b) FROM mv_base_a a');
 ERROR:  this query is not allowed on incrementally maintainable materialized view
 HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
+SELECT create_immv('mv_ivm_subquery', 'SELECT false OR EXISTS(SELECT 1 FROM mv_base_a) FROM mv_base_b');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, CASE EXISTS(SELECT 1 FROM mv_base_a) WHEN true THEN 100 ELSE 10 END), mv_base_b');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
 -- support join subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
