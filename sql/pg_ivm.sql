@@ -245,6 +245,32 @@ DELETE FROM ri1 WHERE i=2;
 SELECT * FROM mv_ri ORDER BY i2;
 ROLLBACK;
 
+-- support subquery for using EXISTS()
+BEGIN;
+SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+SELECT create_immv('mv_ivm_exists_subquery2', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) AND a.i > 2');
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+INSERT INTO mv_base_a VALUES(1,10),(6,60),(3,30),(3,300);
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+INSERT INTO mv_base_b VALUES(1,101);
+INSERT INTO mv_base_b VALUES(1,111);
+INSERT INTO mv_base_b VALUES(2,102);
+INSERT INTO mv_base_b VALUES(6,106);
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+UPDATE mv_base_a SET i = 1 WHERE j =60;
+UPDATE mv_base_b SET i = 10  WHERE k = 101;
+UPDATE mv_base_b SET k = 1002 WHERE k = 102;
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+DELETE FROM mv_base_a WHERE (i,j) = (1,60);
+DELETE FROM mv_base_b WHERE i = 2;
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+ROLLBACK;
+
 -- support simple subquery in FROM clause
 BEGIN;
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
@@ -254,13 +280,18 @@ SELECT * FROM mv_ivm_subquery ORDER BY i,j;
 ROLLBACK;
 
 -- disallow non-simple subqueries
-SELECT create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) b WHERE a.i = b.i');
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a, (SELECT DISTINCT i FROM mv_base_b) b WHERE a.i = b.i');
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j FROM mv_base_a WHERE i IN (SELECT i FROM mv_base_b WHERE k < 103 )');
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) FROM mv_base_a a');
 SELECT create_immv('mv_ivm_subquery', 'SELECT i,j, (SELECT k FROM mv_base_b LIMIT 1) + 1 FROM mv_base_a a');
 SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, (SELECT k FROM mv_base_b LIMIT 1)) AS v');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) OR a.i > 2');
+SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_a a2 WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a2.i = b.i))');
+SELECT create_immv('mv_ivm_subquery', 'SELECT EXISTS(SELECT 1 from mv_base_b) FROM mv_base_a a');
+SELECT create_immv('mv_ivm_subquery', 'SELECT false OR EXISTS(SELECT 1 FROM mv_base_a) FROM mv_base_b');
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, CASE EXISTS(SELECT 1 FROM mv_base_a) WHEN true THEN 100 ELSE 10 END), mv_base_b');
 
 -- support join subquery in FROM clause
 BEGIN;
@@ -370,6 +401,7 @@ ROLLBACK;
 --- disallow not-simple CTE
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT i, COUNT(*) FROM mv_base_b GROUP BY i) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT DISTINCT i FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
+SELECT create_immv('mv_cte_fail', 'WITH a AS (SELECT i, j FROM mv_base_a) SELECT a.i,a.j FROM a WHERE EXISTS(WITH b AS (SELECT i FROM mv_base_b) SELECT 1 FROM b WHERE a.i = b.i)');
 
 -- unreferenced CTE
 SELECT create_immv('mv_cte_fail', 'WITH b AS (SELECT * FROM mv_base_b) SELECT * FROM mv_base_a a');
