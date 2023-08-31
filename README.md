@@ -192,7 +192,10 @@ Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some
 
 The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
-The targetlist cannot contain system columns, columns whose name starts with `__ivm_`.
+Any system column cannot be included in the view definition query.
+The target list cannot columns whose name starts with `__ivm_`.
+
+Data type used in the target list in the view must have default operator class for access method btree. For example, `json`, `xml`, or `point` type cannot be in the target list.
 
 Logical replication is not supported, that is, even when a base table at a publisher node is modified, IMMVs at subscriber nodes defined on these base tables are not updated.
 

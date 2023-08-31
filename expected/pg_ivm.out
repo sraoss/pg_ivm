@@ -1636,6 +1636,12 @@ NOTICE:  created index "mv_idx6_index" on immv "mv_idx6"
 (1 row)
 
 ROLLBACK;
+-- type that doesn't have default operator class for access method btree
+BEGIN;
+CREATE TABLE table_json (j json);
+SELECT create_immv('mv_json', 'SELECT * from table_json');
+ERROR:  data type json has no default operator class for access method "btree"
+ROLLBACK;
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
 ERROR:  cannot change materialized view "mv_ivm_1"
