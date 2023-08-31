@@ -658,6 +658,12 @@ SELECT create_immv('mv_idx5', 'SELECT a.i, b.j FROM base_a a, base_b b');
 SELECT create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
 ROLLBACK;
 
+-- type that doesn't have default operator class for access method btree
+BEGIN;
+CREATE TABLE table_json (j json);
+SELECT create_immv('mv_json', 'SELECT * from table_json');
+ROLLBACK;
+
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
 UPDATE  mv_ivm_1 SET k = 1 WHERE i = 1;

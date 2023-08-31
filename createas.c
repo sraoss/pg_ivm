@@ -17,6 +17,7 @@
 #include "catalog/dependency.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_trigger_d.h"
@@ -828,6 +829,26 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 									 errmsg("system column is not supported on incrementally maintainable materialized view")));
 					}
 				}
+
+				/* check if type in the top target list had an equality operator */
+				if (context->sublevels_up == 0)
+				{
+					foreach(lc, qry->targetList)
+					{
+						TargetEntry *tle = (TargetEntry *) lfirst(lc);
+						Oid		atttype = exprType((Node *) tle->expr);
+						Oid		opclass;
+
+
+						opclass = GetDefaultOpClass(atttype, BTREE_AM_OID);
+						if (!OidIsValid(opclass))
+							ereport(ERROR,
+										(errcode(ERRCODE_UNDEFINED_OBJECT),
+										 errmsg("data type %s has no default operator class for access method \"%s\"",
+												format_type_be(atttype), "btree")));
+					}
+				}
+
 				/* subquery restrictions */
 				if (context->sublevels_up > 0 && qry->distinctClause != NIL)
 					ereport(ERROR,
