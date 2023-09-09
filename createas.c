@@ -66,6 +66,7 @@ typedef struct
 typedef struct
 {
 	bool	has_agg;
+	bool	has_sublinks;
 	bool	has_subquery;
 	bool    in_exists_subquery;	/* true, if it is in a exists subquery */
 	bool	in_jointree;		/* true, if it is in a join tree */
@@ -748,7 +749,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 static void
 check_ivm_restriction(Node *node)
 {
-	check_ivm_restriction_context context = {false, false, false, false, NIL, 0};
+	check_ivm_restriction_context context = {false, false, false, false, false, NIL, 0};
 
 	check_ivm_restriction_walker(node, &context);
 }
@@ -814,6 +815,8 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("recursive query is not supported on incrementally maintainable materialized view")));
+
+				context->has_sublinks |= qry->hasSubLinks;
 
 				/* system column restrictions */
 				vars = pull_vars_of_level((Node *) qry, 0);
@@ -1008,10 +1011,23 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
                                 FromExpr   *from = (FromExpr *) node;
 
 				check_ivm_restriction_walker((Node *)from->fromlist, context);
+				/*
+				 * check the sublink restrictions.
+				 * Currently, EXISTS subqueries with condition other than 'AND' is not supported.
+				 */
+				if (from->quals == NULL)
+					break;
+				if (context->has_sublinks && !context->in_exists_subquery &&
+					!IsA(from->quals, SubLink) && !IsA(from->quals, BoolExpr))
+					ereport(ERROR,
+							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
+							 errhint("sublink only supports simple conditions with EXISTS clause in WHERE clause")));
+
 				context->in_jointree = true;
 				check_ivm_restriction_walker(from->quals, context);
 				context->in_jointree = false;
-			break;
+				break;
 			}
 		case T_JoinExpr:
 			{
