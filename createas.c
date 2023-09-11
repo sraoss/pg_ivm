@@ -78,7 +78,7 @@ static void CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid mat
 static void CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock);
 static void check_ivm_restriction(Node *node);
 static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context);
-static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_create);
+static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList);
 static bool check_aggregate_supports_ivm(Oid aggfnoid);
 
 static void StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery);
@@ -262,14 +262,14 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 			if (!into->skipData)
 			{
 				/* Create an index on incremental maintainable materialized view, if possible */
-				CreateIndexOnIMMV(viewQuery, matviewRel, true);
+				CreateIndexOnIMMV(viewQuery, matviewRel);
 
 				/*
 				 * Create triggers on incremental maintainable materialized view
 				 * This argument should use 'query'. This needs to use a rewritten query,
 				 * because a sublink in jointree is not supported by this function.
 				 */
-				CreateIvmTriggersOnBaseTables(query, matviewOid, true);
+				CreateIvmTriggersOnBaseTables(query, matviewOid);
 
 				/* Create triggers to prevent IMMV from beeing changed */
 				CreateChangePreventTrigger(matviewOid);
@@ -297,7 +297,6 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 {
 	Query *rewritten;
 
-	TargetEntry *tle;
 	Node *node;
 	ParseState *pstate = make_parsestate(NULL);
 	FuncCall *fn;
@@ -348,10 +347,10 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 
 			if (countCol != NULL)
 			{
-				tle = makeTargetEntry((Expr *) countCol,
-											list_length(rewritten->targetList) + 1,
-											pstrdup(columnName),
-											false);
+				TargetEntry *tle = makeTargetEntry((Expr *) countCol,
+												   list_length(rewritten->targetList) + 1,
+												   pstrdup(columnName),
+												   false);
 				rewritten->targetList = list_concat(rewritten->targetList, list_make1(tle));
 			}
 		}
@@ -399,6 +398,8 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 	/* Add count(*) for counting distinct tuples in views */
 	if (rewritten->distinctClause || rewritten->hasAggs)
 	{
+		TargetEntry *tle;
+
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 		fn = makeFuncCall(SystemFuncName("count"), NIL, COERCE_EXPLICIT_CALL, -1);
 #else
@@ -516,22 +517,14 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
  * CreateIvmTriggersOnBaseTables -- create IVM triggers on all base tables
  */
 void
-CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid, bool is_create)
+CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid)
 {
 	Relids	relids = NULL;
 	bool	ex_lock = false;
-	Index	first_rtindex = is_create ? 1 : PRS2_NEW_VARNO + 1;
 	RangeTblEntry *rte;
 
-	/*
-	 * is_create must be true in pg_ivm because the view definition doesn't
-	 * contain NEW/OLD RTE.
-	 * XXX: This argument should be removed?
-	 */
-	Assert(is_create);
-
 	/* Immediately return if we don't have any base tables. */
-	if (list_length(qry->rtable) < first_rtindex)
+	if (list_length(qry->rtable) < 1)
 		return;
 
 	/*
@@ -553,10 +546,9 @@ CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid, bool is_create)
 	 * target list are not nullable.
 	 */
 
-	rte = list_nth(qry->rtable, first_rtindex - 1);
-	if (list_length(qry->rtable) > first_rtindex ||
-		rte->rtekind != RTE_RELATION || qry->distinctClause ||
-		(qry->hasAggs && qry->groupClause))
+	rte = list_nth(qry->rtable, 0);
+	if (list_length(qry->rtable) > 1 || rte->rtekind != RTE_RELATION ||
+		qry->distinctClause || (qry->hasAggs && qry->groupClause))
 		ex_lock = true;
 
 	CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *)qry, matviewOid, &relids, ex_lock);
@@ -927,8 +919,6 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				 */
 				if (context->exists_qual_vars != NIL && context->sublevels_up == 0)
 				{
-					ListCell *lc;
-
 					foreach (lc, context->exists_qual_vars)
 					{
 						Var	*var = (Var *) lfirst(lc);
@@ -1284,7 +1274,7 @@ check_aggregate_supports_ivm(Oid aggfnoid)
  * is created on these attritubes. In other cases, no index is created.
  */
 void
-CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
+CreateIndexOnIMMV(Query *query, Relation matviewRel)
 {
 	ListCell *lc;
 	IndexStmt  *index;
@@ -1293,14 +1283,6 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 	char		idxname[NAMEDATALEN];
 	List	   *indexoidlist = RelationGetIndexList(matviewRel);
 	ListCell   *indexoidscan;
-
-
-	/*
-	 * is_create must be true in pg_ivm because the view definition doesn't
-	 * contain NEW/OLD RTE.
-	 * XXX: This argument should be removed?
-	 */
-	Assert(is_create);
 
 	/*
 	 * For aggregate without GROUP BY, we do not need to create an index
@@ -1341,9 +1323,14 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 	index->excludeOpNames = NIL;
 	index->idxcomment = NULL;
 	index->indexOid = InvalidOid;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	index->oldNumber = InvalidRelFileNumber;
+	index->oldFirstRelfilelocatorSubid = InvalidSubTransactionId;
+#else
 	index->oldNode = InvalidOid;
-	index->oldCreateSubid = InvalidSubTransactionId;
 	index->oldFirstRelfilenodeSubid = InvalidSubTransactionId;
+#endif
+	index->oldCreateSubid = InvalidSubTransactionId;
 	index->transformed = true;
 	index->concurrent = false;
 	index->if_not_exists = false;
@@ -1396,7 +1383,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 		Bitmapset *key_attnos;
 
 		/* create index on the base tables' primary key columns */
-		key_attnos = get_primary_key_attnos_from_query(query, &constraintList, is_create);
+		key_attnos = get_primary_key_attnos_from_query(query, &constraintList);
 		if (key_attnos)
 		{
 			foreach(lc, query->targetList)
@@ -1460,6 +1447,9 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
 						  InvalidOid,
 						  InvalidOid,
 						  InvalidOid,
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+						  -1,
+#endif
 						  false, true, false, false, true);
 
 	ereport(NOTICE,
@@ -1500,7 +1490,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel, bool is_create)
  * constraintList is set to a list of the OIDs of the pkey constraints.
  */
 static Bitmapset *
-get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_create)
+get_primary_key_attnos_from_query(Query *query, List **constraintList)
 {
 	List *key_attnos_list = NIL;
 	ListCell *lc;
@@ -1527,35 +1517,27 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 	 * Collect primary key attributes from all tables used in query. The key attributes
 	 * sets for each table are stored in key_attnos_list in order by RTE index.
 	 */
-	i = 1;
 	foreach(lc, query->rtable)
 	{
 		RangeTblEntry *r = (RangeTblEntry*) lfirst(lc);
 		Bitmapset *key_attnos;
 		bool	has_pkey = true;
-		Index	first_rtindex = is_create ? 1 : PRS2_NEW_VARNO + 1;
 
-		/* skip NEW/OLD entries */
-		if (i >= first_rtindex)
+		/* for subqueries, scan recursively */
+		if (r->rtekind == RTE_SUBQUERY)
 		{
-			/* for subqueries, scan recursively */
-			if (r->rtekind == RTE_SUBQUERY)
-			{
-				key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList, true);
-				has_pkey = (key_attnos != NULL);
-			}
-			/* for tables, call get_primary_key_attnos */
-			else if (r->rtekind == RTE_RELATION)
-			{
-				Oid constraintOid;
-				key_attnos = get_primary_key_attnos(r->relid, false, &constraintOid);
-				*constraintList = lappend_oid(*constraintList, constraintOid);
-				has_pkey = (key_attnos != NULL);
-			}
-			/* for other RTEs, store NULL into key_attnos_list */
-			else
-				key_attnos = NULL;
+			key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList);
+			has_pkey = (key_attnos != NULL);
 		}
+		/* for tables, call get_primary_key_attnos */
+		else if (r->rtekind == RTE_RELATION)
+		{
+			Oid constraintOid;
+			key_attnos = get_primary_key_attnos(r->relid, false, &constraintOid);
+			*constraintList = lappend_oid(*constraintList, constraintOid);
+			has_pkey = (key_attnos != NULL);
+		}
+		/* for other RTEs, store NULL into key_attnos_list */
 		else
 			key_attnos = NULL;
 
@@ -1567,14 +1549,17 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 			return NULL;
 
 		key_attnos_list = lappend(key_attnos_list, key_attnos);
-		i++;
 	}
 
 	/* Collect key attributes appearing in the target list */
 	i = 1;
 	foreach(lc, query->targetList)
 	{
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+		TargetEntry *tle = (TargetEntry *) flatten_join_alias_vars(NULL, query, lfirst(lc));
+#else
 		TargetEntry *tle = (TargetEntry *) flatten_join_alias_vars(query, lfirst(lc));
+#endif
 
 		if (IsA(tle->expr, Var))
 		{
@@ -1588,7 +1573,12 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 				 * Remove found key attributes from key_attnos_list, and add this
 				 * to the result list.
 				 */
-				bms_del_member(key_attnos, var->varattno - FirstLowInvalidHeapAttributeNumber);
+				key_attnos = bms_del_member(key_attnos, var->varattno - FirstLowInvalidHeapAttributeNumber);
+				if (bms_is_empty(key_attnos))
+				{
+					key_attnos_list = list_delete_nth_cell(key_attnos_list, var->varno - 1);
+					key_attnos_list = list_insert_nth(key_attnos_list, var->varno - 1, NULL);
+				}
 				keys = bms_add_member(keys, i - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
@@ -1596,7 +1586,11 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList, bool is_c
 	}
 
 	/* Collect RTE indexes of relations appearing in the FROM clause */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	rels_in_from = get_relids_in_jointree((Node *) query->jointree, false, false);
+#else
 	rels_in_from = get_relids_in_jointree((Node *) query->jointree, false);
+#endif
 
 	/*
 	 * Check if all key attributes of relations in FROM are appearing in the target

@@ -354,9 +354,6 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	{
 		Relation	tgRel;
 		Relation	depRel;
-		ScanKeyData key;
-		SysScanDesc scan;
-		HeapTuple	tup;
 		ObjectAddresses *immv_triggers;
 
 		immv_triggers = new_object_addresses();
@@ -450,7 +447,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 		pgstat_count_heap_insert(matviewRel, processed);
 
 	if (!skipData && !oldPopulated)
-		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid, true);
+		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid);
 
 	table_close(matviewRel, NoLock);
 
@@ -905,8 +902,13 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		if (!(query->hasAggs && query->groupClause == NIL))
 		{
 			OpenImmvIncrementalMaintenance();
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+			ExecuteTruncateGuts(list_make1(matviewRel), list_make1_oid(matviewOid),
+								NIL, DROP_RESTRICT, false, false);
+#else
 			ExecuteTruncateGuts(list_make1(matviewRel), list_make1_oid(matviewOid),
 								NIL, DROP_RESTRICT, false);
+#endif
 			CloseImmvIncrementalMaintenance();
 		}
 		else
@@ -1041,7 +1043,6 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		foreach(lc2, table->rte_paths)
 		{
 			List	*rte_path = lfirst(lc2);
-			int i;
 			Query *querytree = rewritten;
 			RangeTblEntry  *rte;
 			TupleDesc		tupdesc_old;
@@ -1359,7 +1360,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 {
 	StringInfoData str;
 	RawStmt *raw;
-	Query *sub;
+	Query *subquery;
 	Relation rel;
 	ParseState *pstate;
 	char *relname;
@@ -1371,7 +1372,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 
 	/*
 	 * We can use NoLock here since AcquireRewriteLocks should
-	 * have locked the rel already.
+	 * have locked the relation already.
 	 */
 	rel = table_open(table->table_id, NoLock);
 	relname = quote_qualified_identifier(
@@ -1379,12 +1380,19 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 									   RelationGetRelationName(rel));
 	table_close(rel, NoLock);
 
+	/*
+	 * Filtering inserted row using the snapshot taken before the table
+	 * is modified. ctid is required for maintaining outer join views.
+	 */
 	initStringInfo(&str);
 	appendStringInfo(&str,
 		"SELECT t.* FROM %s t"
 		" WHERE pg_catalog.ivm_visible_in_prestate(t.tableoid, t.ctid ,%d::pg_catalog.oid)",
 			relname, matviewid);
 
+	/*
+	 * Append deleted rows contained in old transition tables.
+	 */
 	for (i = 0; i < list_length(table->old_tuplestores); i++)
 	{
 		appendStringInfo(&str, " UNION ALL ");
@@ -1392,20 +1400,21 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 			make_delta_enr_name("old", table->table_id, i));
 	}
 
-
+	/* Get a subquery representing pre-state of the table */
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
 #else
 	raw = (RawStmt*)linitial(raw_parser(str.data));
 #endif
-	sub = transformStmt(pstate, raw->stmt);
+	subquery = transformStmt(pstate, raw->stmt);
 
 	/* save the original RTE */
 	table->original_rte = copyObject(rte);
 
 	rte->rtekind = RTE_SUBQUERY;
-	rte->subquery = sub;
+	rte->subquery = subquery;
 	rte->security_barrier = false;
+
 	/* Clear fields that should not be set in a subquery RTE */
 	rte->relid = InvalidOid;
 	rte->relkind = 0;
@@ -1413,12 +1422,16 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	rte->tablesample = NULL;
 	rte->inh = false;			/* must not be set for a subquery */
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	rte->perminfoindex = 0;         /* no permission checking for this RTE */
+#else
 	rte->requiredPerms = 0;		/* no permission check on subquery itself */
 	rte->checkAsUser = InvalidOid;
 	rte->selectedCols = NULL;
 	rte->insertedCols = NULL;
 	rte->updatedCols = NULL;
 	rte->extraUpdatedCols = NULL;
+#endif
 
 	return rte;
 }
