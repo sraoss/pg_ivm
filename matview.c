@@ -1051,9 +1051,9 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 			char   *count_colname = NULL;
 
 			/* check if the modified table is in EXISTS clause. */
-			for (int j = 0; j < list_length(rte_path); j++)
+			for (i = 0; i < list_length(rte_path); i++)
 			{
-				int index =  lfirst_int(list_nth_cell(rte_path, j));
+				int index =  lfirst_int(list_nth_cell(rte_path, i));
 				rte = (RangeTblEntry *) lfirst(list_nth_cell(querytree->rtable, index - 1));
 
 				if (rte != NULL && rte->rtekind == RTE_SUBQUERY)
