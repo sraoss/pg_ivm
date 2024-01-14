@@ -70,6 +70,7 @@ typedef struct
 	bool	has_subquery;
 	bool    in_exists_subquery;	/* true, if it is in a exists subquery */
 	bool	in_jointree;		/* true, if it is in a join tree */
+	bool	is_simple_jointree;	/* true, if it is in a simple join tree or boolexpr directly under jointree */
 	List    *exists_qual_vars;
 	int		sublevels_up;
 } check_ivm_restriction_context;
@@ -741,7 +742,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 static void
 check_ivm_restriction(Node *node)
 {
-	check_ivm_restriction_context context = {false, false, false, false, false, NIL, 0};
+	check_ivm_restriction_context context = {false, false, false, false, false, false, NIL, 0};
 
 	check_ivm_restriction_walker(node, &context);
 }
@@ -996,6 +997,15 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				expression_tree_walker(node, check_ivm_restriction_walker, (void *) context);
 				break;
 			}
+		case T_List:
+			{
+				ListCell   *temp;
+				foreach(temp, (List *) node)
+				{
+					check_ivm_restriction_walker(lfirst(temp), context);
+				}
+				break;
+			}
                 case T_FromExpr:
                         {
                                 FromExpr   *from = (FromExpr *) node;
@@ -1015,7 +1025,9 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							 errhint("sublink only supports simple conditions with EXISTS clause in WHERE clause")));
 
 				context->in_jointree = true;
+				context->is_simple_jointree = true;
 				check_ivm_restriction_walker(from->quals, context);
+				context->is_simple_jointree = false;
 				context->in_jointree = false;
 				break;
 			}
@@ -1071,6 +1083,12 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					context->exists_qual_vars = lappend(context->exists_qual_vars, node);
 				break;
 			}
+		case T_BoolExpr:
+			{
+				BoolExpr *expr = (BoolExpr *) node;
+				expression_tree_walker((Node *) expr->args, check_ivm_restriction_walker, (void *) context);
+				break;
+			}
 		case T_SubLink:
 			{
 				/* Currently, EXISTS clause is supported only */
@@ -1081,7 +1099,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("this query is not allowed on incrementally maintainable materialized view"),
 							 errhint("sublink only supports subquery with EXISTS clause in WHERE clause")));
-				if (context->sublevels_up > 0)
+				if (context->sublevels_up > 0 || (context->in_jointree && !context->is_simple_jointree))
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("nested sublink is not supported on incrementally maintainable materialized view")));
@@ -1101,6 +1119,8 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				break;
 			}
 		default:
+			// not a simple query, if a condition don't match these
+			context->is_simple_jointree = false;
 			expression_tree_walker(node, check_ivm_restriction_walker, (void *) context);
 			break;
 	}
