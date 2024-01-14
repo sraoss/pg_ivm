@@ -122,7 +122,11 @@ parseNameAndColumns(const char *string, List **names, List **colNames)
 
 	/* Separate the name and parse it into a list */
 	*ptr++ = '\0';
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	*names = stringToQualifiedNameList(rawname, NULL);
+#else
 	*names = stringToQualifiedNameList(rawname);
+#endif
 
 	if (!has_colnames)
 		goto end;
