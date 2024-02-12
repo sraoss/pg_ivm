@@ -80,7 +80,7 @@ When `pg_ivm` is installed, the following objects are created.
 
 ### Functions
 
-#### create_imm
+#### create_immv
 
 Use `create_immv` function to create IMMV.
 ```
