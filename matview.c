@@ -195,7 +195,7 @@ static void apply_new_delta(const char *matviewname, const char *deltaname_new,
 				StringInfo target_list);
 static void apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 				List *keys, StringInfo target_list, StringInfo aggs_set,
-				const char* count_colname);
+				const char* count_colname, bool distinct);
 static char *get_matching_condition_string(List *keys);
 static char *get_returning_string(List *minmax_list, List *is_min_list, List *keys);
 static char *get_minmax_recalc_condition_string(List *minmax_list, List *is_min_list);
@@ -2033,7 +2033,8 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 		/* apply new delta */
 		if (use_count)
 			apply_new_delta_with_count(matviewname, NEW_DELTA_ENRNAME,
-								keys, aggs_set_new, &target_list_buf, count_colname);
+								keys, aggs_set_new, &target_list_buf, count_colname,
+								query->distinctClause != NULL);
 		else
 			apply_new_delta(matviewname, NEW_DELTA_ENRNAME, &target_list_buf);
 	}
@@ -2517,13 +2518,14 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 static void
 apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 				List *keys, StringInfo aggs_set, StringInfo target_list,
-				const char* count_colname)
+				const char* count_colname, bool distinct)
 {
 	StringInfoData	querybuf;
 	StringInfoData	returning_keys;
 	ListCell	*lc;
 	char	*match_cond = "";
 	StringInfoData	deltaname_new_for_insert;
+
 
 	/* build WHERE condition for searching tuples to be updated */
 	match_cond = get_matching_condition_string(keys);
@@ -2551,10 +2553,10 @@ apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 	 * subquery for each row in the view. In this case, __ivm_count__ in
 	 * deltaname_new stores duplicity of rows, and each row need to be
 	 * duplicated as much as __ivm_count__ by using generate_series at
-	 * inserting.
+	 * inserting if DISTINCT is not used.
 	 */
 	initStringInfo(&deltaname_new_for_insert);
-	if (!strcmp(count_colname, "__ivm_count__"))
+	if (!strcmp(count_colname, "__ivm_count__") || distinct)
 		appendStringInfo(&deltaname_new_for_insert, "%s", deltaname_new);
 	else
 		appendStringInfo(&deltaname_new_for_insert,
