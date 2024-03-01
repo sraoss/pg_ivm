@@ -269,6 +269,12 @@ DELETE FROM mv_base_a WHERE (i,j) = (1,60);
 DELETE FROM mv_base_b WHERE i = 2;
 SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
 SELECT * FROM mv_ivm_exists_subquery2 ORDER BY i, j;
+--- EXISTS subquery with tuple duplication and DISTINCT
+SELECT create_immv('mv_ivm_exists_subquery_distinct', 'SELECT DISTINCT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
+DELETE FROM mv_base_b WHERE i = 1 or i = 3;
+INSERT INTO mv_base_b VALUES (1,100), (3,300);
+SELECT * FROM mv_ivm_exists_subquery ORDER BY i, j;
+SELECT * FROM mv_ivm_exists_subquery_distinct ORDER BY i, j;
 ROLLBACK;
 
 -- support simple subquery in FROM clause

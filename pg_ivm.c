@@ -385,11 +385,25 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 
 	if (access == OAT_DROP && classId == RelationRelationId && !OidIsValid(subId))
 	{
-		Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+		Relation pgIvmImmv;
 		SysScanDesc scan;
 		ScanKeyData key;
 		HeapTuple tup;
+		Oid pgIvmImmvOid = PgIvmImmvRelationId();
+	
+		/* pg_ivm_immv is not created yet, so there are no IMMVs, either. */
+		if (pgIvmImmvOid == InvalidOid)
+			return;
 
+		/*
+		 * When the dropped table is pg_ivm_immv, we don't need to continue
+		 * any more. Also, in this case, the index on it is already dropped,
+		 * so the index scan below will fail and raise an error.
+		 */
+		if (objectId == pgIvmImmOid)
+			return;
+		
+		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
 		ScanKeyInit(&key,
 					Anum_pg_ivm_immv_immvrelid,
 					BTEqualStrategyNumber, F_OIDEQ,
