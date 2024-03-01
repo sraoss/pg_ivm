@@ -385,11 +385,16 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 
 	if (access == OAT_DROP && classId == RelationRelationId && !OidIsValid(subId))
 	{
-		Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+		Relation pgIvmImmv;
 		SysScanDesc scan;
 		ScanKeyData key;
 		HeapTuple tup;
-
+		Oid pgIvmImmvOid = PgIvmImmvRelationId();
+		
+		if (pgIvmImmvOid == InvalidOid)
+			return;
+		
+		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
 		ScanKeyInit(&key,
 					Anum_pg_ivm_immv_immvrelid,
 					BTEqualStrategyNumber, F_OIDEQ,
