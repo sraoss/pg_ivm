@@ -1614,35 +1614,25 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 			}
 		case T_BoolExpr:
 			{
-				BoolExprType type;
+				BoolExprType type = ((BoolExpr *) node)->boolop;
 
-				type = ((BoolExpr *) node)->boolop;
-				switch (type)
+				if (type == AND_EXPR)
 				{
 					ListCell *lc;
-					case AND_EXPR:
-						foreach(lc, ((BoolExpr *)node)->args)
-						{
-							/* If simple EXISTS subquery is used, rewrite LATERAL subquery */
-							Node *opnode = (Node *)lfirst(lc);
-							query = rewrite_exists_subquery_walker(query, opnode, count);
-							/*
-							 * overwrite SubLink node to true condition if it is contained in AND_EXPR.
-							 * EXISTS clause have already overwritten to LATERAL, so original EXISTS clause
-							 * is not necessory.
-							 */
-							if (IsA(opnode, SubLink))
-								lfirst(lc) = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
-						}
-						break;
-					case OR_EXPR:
-					case NOT_EXPR:
-						if (checkExprHasSubLink(node))
-							ereport(ERROR,
-									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									 errmsg("this query is not allowed on incrementally maintainable materialized view"),
-									 errhint("OR or NOT conditions and EXISTS condition are not used together")));
-						break;
+					foreach(lc, ((BoolExpr *) node)->args)
+					{
+						/* If simple EXISTS subquery is used, rewrite LATERAL subquery */
+						Node *opnode = (Node *) lfirst(lc);
+						query = rewrite_exists_subquery_walker(query, opnode, count);
+
+						/*
+						 * overwrite SubLink node to true condition if it is contained in AND_EXPR.
+						 * EXISTS clause have already overwritten to LATERAL, so original EXISTS clause
+						 * is not necessory.
+						 */
+						if (IsA(opnode, SubLink))
+							lfirst(lc) = makeConst(BOOLOID, -1, InvalidOid, sizeof(bool), BoolGetDatum(true), false, true);
+					}
 				}
 				break;
 			}
