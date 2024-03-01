@@ -1606,7 +1606,8 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				if (fromexpr->quals != NULL)
 				{
 					query = rewrite_exists_subquery_walker(query, fromexpr->quals, count);
-					/* drop subquery in WHERE clause */
+
+					/* drop WHERE clause when it has only one EXISTS */
 					if (IsA(fromexpr->quals, SubLink))
 						fromexpr->quals = NULL;
 				}
@@ -1691,7 +1692,7 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				/* assume the new RTE is at the end */
 				rtr = makeNode(RangeTblRef);
 				rtr->rtindex = list_length(query->rtable);
-				((FromExpr *)query->jointree)->fromlist = lappend(((FromExpr *)query->jointree)->fromlist, rtr);
+				((FromExpr *) query->jointree)->fromlist = lappend(((FromExpr *) query->jointree)->fromlist, rtr);
 
 				/*
 				 * EXISTS condition is converted to HAVING count(*) > 0.
@@ -1699,13 +1700,13 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
 				 */
 				opId = OpernameGetOprid(list_make2(makeString("pg_catalog"), makeString(">")), INT8OID, INT4OID);
 				opexpr = make_opclause(opId, BOOLOID, false,
-								(Expr *)fn_node,
-								(Expr *)makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(0), false, true),
+								(Expr *) fn_node,
+								(Expr *) makeConst(INT4OID, -1, InvalidOid, sizeof(int32), Int32GetDatum(0), false, true),
 								InvalidOid, InvalidOid);
 				fix_opfuncids((Node *) opexpr);
 				query->hasSubLinks = false;
 
-				subselect->havingQual = (Node *)opexpr;
+				subselect->havingQual = (Node *) opexpr;
 				(*count)++;
 				break;
 			}
@@ -1728,7 +1729,7 @@ rewrite_exists_subquery_walker(Query *query, Node *node, int *count)
  *     SELECT 1, COUNT(*) AS __ivm_exists_count_0__
  *     FROM t2
  *     WHERE t1.key = t2.key
- *     HAVING __ivm_exists_count_0__ > 0) AS ex
+ *     HAVING COUNT(*) > 0) AS ex
  */
 Query *
 rewrite_query_for_exists_subquery(Query *query)
@@ -1740,7 +1741,7 @@ rewrite_query_for_exists_subquery(Query *query)
 				 errmsg("this query is not allowed on incrementally maintainable materialized view"),
 				 errhint("aggregate function and EXISTS condition are not supported at the same time")));
 
-	return rewrite_exists_subquery_walker(query, (Node *)query, &count);
+	return rewrite_exists_subquery_walker(query, (Node *) query, &count);
 }
 
 /*

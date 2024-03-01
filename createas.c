@@ -465,7 +465,7 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 
 		/* Make a Func with a dummy arg, and then override this by the original agg's args. */
 		node = ParseFuncOrColumn(pstate, fn->funcname, list_make1(dmy_arg), NULL, fn, false, -1);
-		((Aggref *)node)->args = aggref->args;
+		((Aggref *) node)->args = aggref->args;
 
 		tle_count = makeTargetEntry((Expr *) node,
 									*next_resno,
@@ -501,7 +501,7 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 
 		/* Make a Func with dummy args, and then override this by the original agg's args. */
 		node = ParseFuncOrColumn(pstate, fn->funcname, dmy_args, NULL, fn, false, -1);
-		((Aggref *)node)->args = aggref->args;
+		((Aggref *) node)->args = aggref->args;
 
 		tle_count = makeTargetEntry((Expr *) node,
 									*next_resno,
@@ -572,7 +572,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				Query *query = (Query *) node;
 				ListCell *lc;
 
-				CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *)query->jointree, matviewOid, relids, ex_lock);
+				CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *) query->jointree, matviewOid, relids, ex_lock);
 				foreach(lc, query->cteList)
 				{
 					CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
@@ -604,7 +604,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				{
 					Query *subquery = rte->subquery;
 					Assert(rte->subquery != NULL);
-					CreateIvmTriggersOnBaseTablesRecurse(subquery, (Node *)subquery, matviewOid, relids, ex_lock);
+					CreateIvmTriggersOnBaseTablesRecurse(subquery, (Node *) subquery, matviewOid, relids, ex_lock);
 				}
 			}
 			break;
@@ -767,7 +767,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 	{
 		case T_Query:
 			{
-				Query *qry = (Query *)node;
+				Query *qry = (Query *) node;
 				ListCell   *lc;
 				List       *vars;
 
@@ -823,7 +823,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					if (IsA(lfirst(lc), Var))
 					{
 						Var *var = (Var *) lfirst(lc);
-						/* if system column, return error */
+						/* if the view has a system column, raise an error */
 						if (var->varattno < 0)
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -831,7 +831,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					}
 				}
 
-				/* check if type in the top target list had an equality operator */
+				/* check that each type in the target list has an equality operator */
 				if (context->sublevels_up == 0)
 				{
 					foreach(lc, qry->targetList)
@@ -902,6 +902,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("VALUES is not supported on incrementally maintainable materialized view")));
+
 					if (rte->relkind == RELKIND_RELATION && isImmv(rte->relid))
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -920,9 +921,11 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				/*
 				 * additional restriction checks for exists subquery
 				 *
-				 * If the query has any EXISTS clauses and columns in them refer to
-				 * columns in tables in the output query, those columns must be
-				 * included in the target list.
+				 * If the query has an EXISTS subquery and columns of a table in
+				 * the outer query are used in the EXISTS subquery, those columns
+				 * must be included in the target list. These columns are required
+				 * to identify tuples in the view to be affected by modification
+				 * of tables in the EXISTS subquery.
 				 */
 				if (context->exists_qual_vars != NIL && context->sublevels_up == 0)
 				{
@@ -965,7 +968,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("WITH query name %s is not supported on incrementally maintainable materialized view", cte->ctename)));
 
-				/* 
+				/*
 				 * When a table in a unreferenced CTE is TRUNCATEd, the contents of the
 				 * IMMV is not affected so it must not be truncated. For confirming it
 				 * at the maintenance time, we have to check if the modified table used
@@ -986,12 +989,13 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 			}
 		case T_TargetEntry:
 			{
-				TargetEntry *tle = (TargetEntry *)node;
+				TargetEntry *tle = (TargetEntry *) node;
 
 				if (isIvmName(tle->resname))
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("column name %s is not supported on incrementally maintainable materialized view", tle->resname)));
+
 				if (context->has_agg && !IsA(tle->expr, Aggref) && contain_aggs_of_level((Node *) tle->expr, 0))
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1015,7 +1019,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 			}
 		case T_JoinExpr:
 			{
-				JoinExpr *joinexpr = (JoinExpr *)node;
+				JoinExpr *joinexpr = (JoinExpr *) node;
 
 				if (joinexpr->jointype > JOIN_INNER)
 						ereport(ERROR,
@@ -1117,7 +1121,8 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("nested sublink is not supported on incrementally maintainable materialized view")));
 
-				subselect = (Query *)sublink->subselect;
+				subselect = (Query *) sublink->subselect;
+
 				/* raise ERROR if the sublink has CTE */
 				if (subselect->cteList)
 					ereport(ERROR,
@@ -1647,7 +1652,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 	i = 1;
 	foreach(lc, key_attnos_list)
 	{
-		Bitmapset *bms = (Bitmapset *)lfirst(lc);
+		Bitmapset *bms = (Bitmapset *) lfirst(lc);
 		if (!bms_is_empty(bms) && bms_is_member(i, rels_in_from))
 			return NULL;
 		i++;
