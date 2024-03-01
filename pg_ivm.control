@@ -1,6 +1,6 @@
 # incremental view maintenance extension_
 comment = 'incremental view maintenance on PostgreSQL'
-default_version = '1.7'
+default_version = '1.8'
 module_pathname = '$libdir/pg_ivm'
 relocatable = false 
 schema = pg_catalog
