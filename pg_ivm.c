@@ -400,7 +400,7 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		 * any more. Also, in this case, the index on it is already dropped,
 		 * so the index scan below will fail and raise an error.
 		 */
-		if (objectId == pgIvmImmOid)
+		if (objectId == pgIvmImmvOid)
 			return;
 		
 		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
