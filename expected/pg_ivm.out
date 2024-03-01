@@ -906,7 +906,7 @@ ERROR:  this query is not allowed on incrementally maintainable materialized vie
 HINT:  targetlist must contain vars that are referred to in EXISTS subquery
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) OR a.i > 2');
 ERROR:  this query is not allowed on incrementally maintainable materialized view
-HINT:  OR or NOT conditions and EXISTS condition are not used together
+HINT:  OR or NOT conditions and EXISTS condition can not be used together
 SELECT create_immv('mv_ivm_subquery', 'SELECT a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_a a2 WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a2.i = b.i))');
 ERROR:  nested sublink is not supported on incrementally maintainable materialized view
 SELECT create_immv('mv_ivm_subquery', 'SELECT EXISTS(SELECT 1 from mv_base_b) FROM mv_base_a a');
@@ -914,8 +914,14 @@ ERROR:  this query is not allowed on incrementally maintainable materialized vie
 HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
 SELECT create_immv('mv_ivm_subquery', 'SELECT false OR EXISTS(SELECT 1 FROM mv_base_a) FROM mv_base_b');
 ERROR:  this query is not allowed on incrementally maintainable materialized view
-HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
+HINT:  OR or NOT conditions and EXISTS condition can not be used together
 SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM generate_series(1, CASE EXISTS(SELECT 1 FROM mv_base_a) WHEN true THEN 100 ELSE 10 END), mv_base_b');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM mv_base_a a WHERE CASE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) WHEN true THEN false ELSE true END');
+ERROR:  this query is not allowed on incrementally maintainable materialized view
+HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
+SELECT create_immv('mv_ivm_subquery', 'SELECT * FROM mv_base_a a WHERE true and CASE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) WHEN true THEN false ELSE true END');
 ERROR:  this query is not allowed on incrementally maintainable materialized view
 HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
 -- support join subquery in FROM clause
