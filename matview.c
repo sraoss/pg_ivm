@@ -80,8 +80,14 @@ typedef struct MV_QueryHashEntry
 {
 	MV_QueryKey key;
 	SPIPlanPtr	plan;
+
+#if PG_VERSION_NUM < 170000
 	OverrideSearchPath *search_path;	/* search_path used for parsing
 										 * and planning */
+#else
+	SearchPathMatcher *search_path;	/* search_path used for parsing
+										 * and planning */
+#endif
 
 } MV_QueryHashEntry;
 
@@ -3066,7 +3072,11 @@ mv_FetchPreparedPlan(MV_QueryKey *key)
 	 */
 	plan = entry->plan;
 	if (plan && SPI_plan_is_valid(plan) &&
+#if PG_VERSION_NUM < 170000
 		OverrideSearchPathMatchesCurrent(entry->search_path))
+#else
+		SearchPathMatchesCurrentEnvironment(entry->search_path))
+#endif
 		return plan;
 
 	/*
@@ -3110,7 +3120,11 @@ mv_HashPreparedPlan(MV_QueryKey *key, SPIPlanPtr plan)
 											  HASH_ENTER, &found);
 	Assert(!found || entry->plan == NULL);
 	entry->plan = plan;
+#if PG_VERSION_NUM < 170000
 	entry->search_path = GetOverrideSearchPath(TopMemoryContext);
+#else
+	entry->search_path = GetSearchPathMatcher(TopMemoryContext);
+#endif
 }
 
 /*
