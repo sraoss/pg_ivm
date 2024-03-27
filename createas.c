@@ -1375,7 +1375,11 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 	index->excludeOpNames = NIL;
 	index->idxcomment = NULL;
 	index->indexOid = InvalidOid;
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
+	index->iswithoutoverlaps = false;
+	index->oldNumber = InvalidRelFileNumber;
+	index->oldFirstRelfilelocatorSubid = InvalidSubTransactionId;
+#elif defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
 	index->oldNumber = InvalidRelFileNumber;
 	index->oldFirstRelfilelocatorSubid = InvalidSubTransactionId;
 #else
@@ -1482,10 +1486,18 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 
 		indexRel = index_open(indexoid, AccessShareLock);
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
+		if (CheckIndexCompatible(indexRel->rd_id,
+								index->accessMethod,
+								index->indexParams,
+								index->excludeOpNames,
+								index->iswithoutoverlaps))
+#else
 		if (CheckIndexCompatible(indexRel->rd_id,
 								index->accessMethod,
 								index->indexParams,
 								index->excludeOpNames))
+#endif
 			hasCompatibleIndex = true;
 
 		index_close(indexRel, AccessShareLock);
