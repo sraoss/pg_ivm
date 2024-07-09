@@ -94,7 +94,7 @@ When an IMMV is created, some triggers are automatically created so that the vie
 
 Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
-#### refresh_imm
+#### refresh_immv
 
 Use `refresh_immv` function to refresh IMMV.
 ```
@@ -267,7 +267,7 @@ If some base tables have row level security policy, rows that are not visible to
 
 IVM is effective when we want to keep an IMMV up-to-date and small fraction of a base table is modified infrequently.  Due to the overhead of immediate maintenance, IVM is not effective when a base table is modified frequently.  Also, when a large part of a base table is modified or large data is inserted into a base table, IVM is not effective and the cost of maintenance can be larger than refresh from scratch.
 
-In such situation, we can use `refesh_immv` function with `with_data = false` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
+In such situation, we can use `refresh_immv` function with `with_data = false` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
 
 ## Authors
 IVM Development Group
