@@ -92,7 +92,7 @@ static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
  * This imitates PostgreSQL's ExecCreateTableAs().
  */
 ObjectAddress
-ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
+ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt, bool unlogged,
 				  ParamListInfo params, QueryEnvironment *queryEnv,
 				  QueryCompletion *qc)
 {
@@ -117,6 +117,14 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 
 	/* must be a CREATE MATERIALIZED VIEW statement */
 	Assert(is_matview);
+
+	/*
+	 * For volatile data, it can be useful not to write to WALs.
+	 * SEE THE POSTGRESQL DOCUMENTATION FOR DRAWBACKS (not replicated or included in physical backups, truncated in case of a crash, ...):
+	 * https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-UNLOGGED
+	 */
+	if (unlogged)
+		into->rel->relpersistence = RELPERSISTENCE_UNLOGGED;
 
 	/*
 	 * Set into->viewQuery must to NULL because we want to  make a
