@@ -90,7 +90,7 @@ create_immv(immv_name text, view_definition text) RETURNS bigint
 
 When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
 
-#### refresh_imm
+#### refresh_immv
 
 Use `refresh_immv` function to refresh IMMV.
 ```
@@ -261,7 +261,7 @@ If some base tables have row level security policy, rows that are not visible to
 
 IVM is effective when we want to keep an IMMV up-to-date and small fraction of a base table is modified infrequently.  Due to the overhead of immediate maintenance, IVM is not effective when a base table is modified frequently.  Also, when a large part of a base table is modified or large data is inserted into a base table, IVM is not effective and the cost of maintenance can be larger than refresh from scratch.
 
-In such situation, we can use `refesh_immv` function with `with_data = false` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
+In such situation, we can use `refresh_immv` function with `with_data = false` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
 
 ## Authors
 IVM Development Group

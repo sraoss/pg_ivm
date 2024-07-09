@@ -110,7 +110,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	Query	   *viewQuery = (Query *) into->viewQuery;
 
 	/*
-	 * We use this always true flag to imitate ExecCreaetTableAs(9
+	 * We use this always true flag to imitate ExecCreateTableAs()
 	 * aiming to make it easier to follow up the original code.
 	 */
 	const bool	is_ivm = true;
