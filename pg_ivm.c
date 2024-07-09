@@ -173,6 +173,7 @@ create_immv(PG_FUNCTION_ARGS)
 {
 	text	*t_relname = PG_GETARG_TEXT_PP(0);
 	text	*t_sql = PG_GETARG_TEXT_PP(1);
+	bool	unlogged = PG_GETARG_BOOL(2);
 	char	*relname = text_to_cstring(t_relname);
 	char	*sql = text_to_cstring(t_sql);
 	List	*parsetree_list;
@@ -228,7 +229,7 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *)ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, NULL, NULL, &qc);
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, unlogged, NULL, NULL, &qc);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }

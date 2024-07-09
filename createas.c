@@ -234,13 +234,21 @@ create_immv_nodata(List *tlist, IntoClause *into)
  */
 ObjectAddress
 ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-				  ParamListInfo params, QueryEnvironment *queryEnv,
-				  QueryCompletion *qc)
+				  bool unlogged, ParamListInfo params,
+				  QueryEnvironment *queryEnv, QueryCompletion *qc)
 {
 	Query	   *query = castNode(Query, stmt->query);
 	IntoClause *into = stmt->into;
 	bool		do_refresh = false;
 	ObjectAddress address;
+
+	/*
+	 * For volatile data, it can be useful not to write to WALs.
+	 * SEE THE POSTGRESQL DOCUMENTATION FOR DRAWBACKS (not replicated or included in physical backups, truncated in case of a crash, ...):
+	 * https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-UNLOGGED
+	 */
+	if (unlogged)
+		into->rel->relpersistence = RELPERSISTENCE_UNLOGGED;
 
 	/* Check if the relation exists or not */
 	if (CreateTableAsRelExists(stmt))

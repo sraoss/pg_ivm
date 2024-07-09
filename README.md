@@ -86,13 +86,19 @@ When `pg_ivm` is installed, the following objects are created.
 
 Use `create_immv` function to create IMMV.
 ```
-create_immv(immv_name text, view_definition text) RETURNS bigint
+create_immv(immv_name text, view_definition text [, unlogged bool DEFAULT false]) RETURNS bigint
 ```
 `create_immv` defines a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
 When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
 
 Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
+
+In some cases (e.g. for very large IMMVs containing volatile data), and only if you really know what you are doing, it may be useful to create an IMMV without writing to the [PostgreSQL Write-Ahead Logs](https://www.postgresql.org/docs/current/wal-intro.html) (the underlying table is created with the `UNLOGGED` parameter). Unlogged tables improve write performance, reduce vacuum impact and produce fewer WALs (thus reducing network usage, backup size and restoration time).
+```sql
+SELECT create_immv('myview', 'SELECT * FROM mytab', true);
+```
+**Important:** see the [PostgreSQL documentation](https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-UNLOGGED) for unlogged tables **DRAWBACKS** (not replicated or included in physical backups, truncated in case of PostgreSQL crash, ...).
 
 #### refresh_immv
 

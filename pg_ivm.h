@@ -35,7 +35,7 @@ extern bool isImmv(Oid immv_oid);
 
 /* createas.c */
 
-extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
+extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt, bool unlogged,
 									ParamListInfo params, QueryEnvironment *queryEnv,
 									QueryCompletion *qc);
 extern void CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid);
