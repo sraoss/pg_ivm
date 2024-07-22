@@ -14,7 +14,8 @@ EXTENSION = pg_ivm
 DATA = pg_ivm--1.0.sql \
        pg_ivm--1.0--1.1.sql pg_ivm--1.1--1.2.sql pg_ivm--1.2--1.3.sql \
        pg_ivm--1.3--1.4.sql pg_ivm--1.4--1.5.sql pg_ivm--1.5--1.6.sql \
-       pg_ivm--1.6--1.7.sql pg_ivm--1.7--1.8.sql pg_ivm--1.8--1.9.sql
+       pg_ivm--1.6--1.7.sql pg_ivm--1.7--1.8.sql pg_ivm--1.8--1.9.sql \
+       pg_ivm--1.9--1.10.sql
 
 REGRESS = pg_ivm create_immv refresh_immv
 
