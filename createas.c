@@ -11,9 +11,9 @@
  */
 #include "postgres.h"
 
-#include "access/xact.h"
-#include "access/genam.h"
 #include "access/heapam.h"
+#include "access/reloptions.h"
+#include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
@@ -21,16 +21,15 @@
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_trigger_d.h"
+#include "catalog/toasting.h"
 #include "commands/createas.h"
 #include "commands/defrem.h"
+#include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
-#include "executor/execdesc.h"
-#include "executor/executor.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
-#include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/prep.h"
 #include "parser/parser.h"
@@ -40,12 +39,11 @@
 #include "parser/parse_type.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
-#include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/regproc.h"
-#include "utils/snapmgr.h"
+#include "utils/rel.h"
 #include "utils/syscache.h"
 
 #include "pg_ivm.h"
@@ -62,6 +60,9 @@ typedef struct
 	BulkInsertState bistate;	/* bulk insert state */
 } DR_intorel;
 
+/* utility functions for IMMV definition creation */
+static ObjectAddress create_immv_internal(List *attrList, IntoClause *into);
+static ObjectAddress create_immv_nodata(List *tlist, IntoClause *into);
 
 typedef struct
 {
@@ -80,11 +81,151 @@ static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_conte
 static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList);
 static bool check_aggregate_supports_ivm(Oid aggfnoid);
 
-static void StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery);
+static void StoreImmvQuery(Oid viewOid, Query *viewQuery);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
 static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
 #endif
+
+/*
+ * create_immv_internal
+ *
+ * Internal utility used for the creation of the definition of an IMMV.
+ * Caller needs to provide a list of attributes (ColumnDef nodes).
+ *
+ * This imitates PostgreSQL's create_ctas_internal().
+ */
+static ObjectAddress
+create_immv_internal(List *attrList, IntoClause *into)
+{
+	CreateStmt *create = makeNode(CreateStmt);
+	char		relkind;
+	Datum		toast_options;
+	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	ObjectAddress intoRelationAddr;
+
+	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
+	/* relkind of IMMV must be RELKIND_RELATION */
+	relkind = RELKIND_RELATION;
+
+	/*
+	 * Create the target relation by faking up a CREATE TABLE parsetree and
+	 * passing it to DefineRelation.
+	 */
+	create->relation = into->rel;
+	create->tableElts = attrList;
+	create->inhRelations = NIL;
+	create->ofTypename = NULL;
+	create->constraints = NIL;
+	create->options = into->options;
+	create->oncommit = into->onCommit;
+	create->tablespacename = into->tableSpaceName;
+	create->if_not_exists = false;
+	create->accessMethod = into->accessMethod;
+
+	/*
+	 * Create the relation.  (This will error out if there's an existing view,
+	 * so we don't need more code to complain if "replace" is false.)
+	 */
+	intoRelationAddr = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
+
+	/*
+	 * If necessary, create a TOAST table for the target table.  Note that
+	 * NewRelationCreateToastTable ends with CommandCounterIncrement(), so
+	 * that the TOAST table will be visible for insertion.
+	 */
+	CommandCounterIncrement();
+
+	/* parse and validate reloptions for the toast table */
+	toast_options = transformRelOptions((Datum) 0,
+										create->options,
+										"toast",
+										validnsps,
+										true, false);
+
+	(void) heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
+
+	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
+
+	/* Create the "view" part of an IMMV. */
+	StoreImmvQuery(intoRelationAddr.objectId, (Query *) into->viewQuery);
+	CommandCounterIncrement();
+
+	return intoRelationAddr;
+}
+
+/*
+ * create_immv_nodata
+ *
+ * Create an IMMV  when WITH NO DATA is used, starting from
+ * the targetlist of the view definition.
+ *
+ * This imitates PostgreSQL's create_ctas_nodata().
+ */
+static ObjectAddress
+create_immv_nodata(List *tlist, IntoClause *into)
+{
+	List	   *attrList;
+	ListCell   *t,
+			   *lc;
+
+	/*
+	 * Build list of ColumnDefs from non-junk elements of the tlist.  If a
+	 * column name list was specified in CREATE TABLE AS, override the column
+	 * names in the query.  (Too few column names are OK, too many are not.)
+	 */
+	attrList = NIL;
+	lc = list_head(into->colNames);
+	foreach(t, tlist)
+	{
+		TargetEntry *tle = (TargetEntry *) lfirst(t);
+
+		if (!tle->resjunk)
+		{
+			ColumnDef  *col;
+			char	   *colname;
+
+			if (lc)
+			{
+				colname = strVal(lfirst(lc));
+				lc = lnext(into->colNames, lc);
+			}
+			else
+				colname = tle->resname;
+
+			col = makeColumnDef(colname,
+								exprType((Node *) tle->expr),
+								exprTypmod((Node *) tle->expr),
+								exprCollation((Node *) tle->expr));
+
+			/*
+			 * It's possible that the column is of a collatable type but the
+			 * collation could not be resolved, so double-check.  (We must
+			 * check this here because DefineRelation would adopt the type's
+			 * default collation rather than complaining.)
+			 */
+			if (!OidIsValid(col->collOid) &&
+				type_is_collatable(col->typeName->typeOid))
+				ereport(ERROR,
+						(errcode(ERRCODE_INDETERMINATE_COLLATION),
+						 errmsg("no collation was derived for column \"%s\" with collatable type %s",
+								col->colname,
+								format_type_be(col->typeName->typeOid)),
+						 errhint("Use the COLLATE clause to set the collation explicitly.")));
+
+			attrList = lappend(attrList, col);
+		}
+	}
+
+	if (lc != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("too many column names were specified")));
+
+	/* Create the relation definition using the ColumnDef list */
+	return create_immv_internal(attrList, into);
+}
+
 
 /*
  * ExecCreateImmv -- execute a create_immv() function
@@ -98,42 +239,12 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 {
 	Query	   *query = castNode(Query, stmt->query);
 	IntoClause *into = stmt->into;
-	bool		is_matview = (into->viewQuery != NULL);
-	DestReceiver *dest;
-	Oid			save_userid = InvalidOid;
-	int			save_sec_context = 0;
-	int			save_nestlevel = 0;
+	bool		do_refresh = false;
 	ObjectAddress address;
-	List	   *rewritten;
-	PlannedStmt *plan;
-	QueryDesc  *queryDesc;
-	Query	   *viewQuery = (Query *) into->viewQuery;
-
-	/*
-	 * We use this always true flag to imitate ExecCreaetTableAs(9
-	 * aiming to make it easier to follow up the original code.
-	 */
-	const bool	is_ivm = true;
-
-	/* must be a CREATE MATERIALIZED VIEW statement */
-	Assert(is_matview);
-
-	/*
-	 * Set into->viewQuery must to NULL because we want to  make a
-	 * table instead of a materialized view. Before that, save the
-	 * view query.
-	 */
-	viewQuery = (Query *) into->viewQuery;
-	into->viewQuery = NULL;
 
 	/* Check if the relation exists or not */
 	if (CreateTableAsRelExists(stmt))
 		return InvalidObjectAddress;
-
-	/*
-	 * Create the tuple receiver object and insert info it will need
-	 */
-	dest = CreateIntoRelDestReceiver(into);
 
 	/*
 	 * The contained Query must be a SELECT.
@@ -141,140 +252,54 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	Assert(query->commandType == CMD_SELECT);
 
 	/*
-	 * For materialized views, lock down security-restricted operations and
-	 * arrange to make GUC variable changes local to this command.  This is
-	 * not necessary for security, but this keeps the behavior similar to
-	 * REFRESH MATERIALIZED VIEW.  Otherwise, one could create a materialized
-	 * view not possible to refresh.
+	 * For materialized views, always skip data during table creation, and use
+	 * REFRESH instead (see below).
 	 */
-	if (is_matview)
+	do_refresh = !into->skipData;
+
+	/* check if the query is supported in IMMV definition */
+	if (contain_mutable_functions((Node *) query))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("mutable function is not supported on incrementally maintainable materialized view"),
+				 errhint("functions must be marked IMMUTABLE")));
+
+	check_ivm_restriction((Node *) query);
+
+	/* For IMMV, we need to rewrite matview query */
+	query = rewriteQueryForIMMV(query, into->colNames);
+
+	/*
+	 * If WITH NO DATA was specified, do not go through the rewriter,
+	 * planner and executor.  Just define the relation using a code path
+	 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
+	 * from running the planner before all dependencies are set up.
+	 */
+	address = create_immv_nodata(query->targetList, into);
+
+	/*
+	 * For materialized views, reuse the REFRESH logic, which locks down
+	 * security-restricted operations and restricts the search_path.  This
+	 * reduces the chance that a subsequent refresh will fail.
+	 */
+	if (do_refresh)
 	{
-		GetUserIdAndSecContext(&save_userid, &save_sec_context);
-		SetUserIdAndSecContext(save_userid,
-							   save_sec_context | SECURITY_RESTRICTED_OPERATION);
-		save_nestlevel = NewGUCNestLevel();
-	}
+		Relation matviewRel;
 
-	if (is_matview && is_ivm)
-	{
-		/* check if the query is supported in IMMV definition */
-		if (contain_mutable_functions((Node *) query))
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("mutable function is not supported on incrementally maintainable materialized view"),
-					 errhint("functions must be marked IMMUTABLE")));
+		RefreshImmvByOid(address.objectId, false, pstate->p_sourcetext, qc);
 
-		check_ivm_restriction((Node *) query);
-
-		/* For IMMV, we need to rewrite matview query */
-		query = rewriteQueryForIMMV(viewQuery, into->colNames);
-
-	}
-
-	if (into->skipData)
-	{
-		/*
-		 * If WITH NO DATA was specified, do not go through the rewriter,
-		 * planner and executor.  Just define the relation using a code path
-		 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
-		 * from running the planner before all dependencies are set up.
-		 */
-
-		/* XXX: Currently, WITH NO DATA is not supported in the extension version */
-		//address = create_ctas_nodata(query->targetList, into);
-	}
-	else
-	{
-		/*
-		 * Parse analysis was done already, but we still have to run the rule
-		 * rewriter.  We do not do AcquireRewriteLocks: we assume the query
-		 * either came straight from the parser, or suitable locks were
-		 * acquired by plancache.c.
-		 */
-		rewritten = QueryRewrite(query);
-
-		/* SELECT should never rewrite to more or less than one SELECT query */
-		if (list_length(rewritten) != 1)
-			elog(ERROR, "unexpected rewrite result for %s",
-				 is_matview ? "CREATE MATERIALIZED VIEW" :
-				 "CREATE TABLE AS SELECT");
-		query = linitial_node(Query, rewritten);
-		Assert(query->commandType == CMD_SELECT);
-
-		/* plan the query */
-		plan = pg_plan_query(query, pstate->p_sourcetext,
-							 CURSOR_OPT_PARALLEL_OK, params);
-
-		/*
-		 * Use a snapshot with an updated command ID to ensure this query sees
-		 * results of any previously executed queries.  (This could only
-		 * matter if the planner executed an allegedly-stable function that
-		 * changed the database contents, but let's do it anyway to be
-		 * parallel to the EXPLAIN code path.)
-		 */
-		PushCopiedSnapshot(GetActiveSnapshot());
-		UpdateActiveSnapshotCommandId();
-
-		/* Create a QueryDesc, redirecting output to our tuple receiver */
-		queryDesc = CreateQueryDesc(plan, pstate->p_sourcetext,
-									GetActiveSnapshot(), InvalidSnapshot,
-									dest, params, queryEnv, 0);
-
-		/* call ExecutorStart to prepare the plan for execution */
-		ExecutorStart(queryDesc, GetIntoRelEFlags(into));
-
-		/* run the plan to completion */
-		ExecutorRun(queryDesc, ForwardScanDirection, 0L, true);
-
-		/* save the rowcount if we're given a qc to fill */
 		if (qc)
-			SetQueryCompletion(qc, CMDTAG_SELECT, queryDesc->estate->es_processed);
+			qc->commandTag = CMDTAG_SELECT;
 
-		/* get object address that intorel_startup saved for us */
-		address = ((DR_intorel *) dest)->reladdr;
+		matviewRel = table_open(address.objectId, NoLock);
 
-		/* and clean up */
-		ExecutorFinish(queryDesc);
-		ExecutorEnd(queryDesc);
+		/* Create an index on incremental maintainable materialized view, if possible */
+		CreateIndexOnIMMV(query, matviewRel);
 
-		FreeQueryDesc(queryDesc);
+		/* Create triggers to prevent IMMV from beeing changed */
+		CreateChangePreventTrigger(address.objectId);
 
-		PopActiveSnapshot();
-	}
-
-	/* Create the "view" part of an IMMV. */
-	StoreImmvQuery(address.objectId, !into->skipData, viewQuery);
-
-	if (is_matview)
-	{
-		/* Roll back any GUC changes */
-		AtEOXact_GUC(false, save_nestlevel);
-
-		/* Restore userid and security context */
-		SetUserIdAndSecContext(save_userid, save_sec_context);
-
-		if (is_ivm)
-		{
-			Oid matviewOid = address.objectId;
-			Relation matviewRel = table_open(matviewOid, NoLock);
-
-			if (!into->skipData)
-			{
-				/* Create an index on incremental maintainable materialized view, if possible */
-				CreateIndexOnIMMV(viewQuery, matviewRel);
-
-				/*
-				 * Create triggers on incremental maintainable materialized view
-				 * This argument should use 'query'. This needs to use a rewritten query,
-				 * because a sublink in jointree is not supported by this function.
-				 */
-				CreateIvmTriggersOnBaseTables(query, matviewOid);
-
-				/* Create triggers to prevent IMMV from beeing changed */
-				CreateChangePreventTrigger(matviewOid);
-			}
-			table_close(matviewRel, NoLock);
-		}
+		table_close(matviewRel, NoLock);
 	}
 
 	return address;
@@ -1375,11 +1400,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 	index->excludeOpNames = NIL;
 	index->idxcomment = NULL;
 	index->indexOid = InvalidOid;
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
-	index->iswithoutoverlaps = false;
-	index->oldNumber = InvalidRelFileNumber;
-	index->oldFirstRelfilelocatorSubid = InvalidSubTransactionId;
-#elif defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
 	index->oldNumber = InvalidRelFileNumber;
 	index->oldFirstRelfilelocatorSubid = InvalidSubTransactionId;
 #else
@@ -1486,18 +1507,10 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 
 		indexRel = index_open(indexoid, AccessShareLock);
 
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
-		if (CheckIndexCompatible(indexRel->rd_id,
-								index->accessMethod,
-								index->indexParams,
-								index->excludeOpNames,
-								index->iswithoutoverlaps))
-#else
 		if (CheckIndexCompatible(indexRel->rd_id,
 								index->accessMethod,
 								index->indexParams,
 								index->excludeOpNames))
-#endif
 			hasCompatibleIndex = true;
 
 		index_close(indexRel, AccessShareLock);
@@ -1677,7 +1690,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
  * Store the query for the IMMV to pg_ivwm_immv
  */
 static void
-StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery)
+StoreImmvQuery(Oid viewOid, Query *viewQuery)
 {
 	char   *querytree = nodeToString((Node *) viewQuery);
 	Datum values[Natts_pg_ivm_immv];
@@ -1691,7 +1704,7 @@ StoreImmvQuery(Oid viewOid, bool ispopulated, Query *viewQuery)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
-	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(ispopulated);
+	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
