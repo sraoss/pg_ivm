@@ -234,6 +234,40 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 				const char *queryString, QueryCompletion *qc)
 {
 	Oid			matviewOid;
+	LOCKMODE	lockmode;
+
+	/* Determine strength of lock needed. */
+	//concurrent = stmt->concurrent;
+	//lockmode = concurrent ? ExclusiveLock : AccessExclusiveLock;
+	lockmode = AccessExclusiveLock;
+
+	/*
+	 * Get a lock until end of transaction.
+	 */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+	matviewOid = RangeVarGetRelidExtended(relation,
+										  lockmode, 0,
+										  RangeVarCallbackOwnsTable,
+										  NULL);
+#else
+	matviewOid = RangeVarGetRelidExtended(relation,
+										  lockmode, 0,
+										  RangeVarCallbackMaintainsTable,
+										  NULL);
+#endif
+
+	return RefreshImmvByOid(matviewOid, skipData, queryString, qc);
+}
+
+/*
+ * RefreshMatViewByOid -- refresh IMMV view by OID
+ *
+ * This imitates PostgreSQL's RefreshMatViewByOid().
+ */
+ObjectAddress
+RefreshImmvByOid(Oid matviewOid, bool skipData,
+				 const char *queryString, QueryCompletion *qc)
+{
 	Relation	matviewRel;
 	Query	   *dataQuery = NULL; /* initialized to keep compiler happy */
 	Query	   *viewQuery;
@@ -242,8 +276,6 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	Oid			OIDNewHeap;
 	DestReceiver *dest;
 	uint64		processed = 0;
-	//bool		concurrent;
-	LOCKMODE	lockmode;
 	char		relpersistence;
 	Oid			save_userid;
 	int			save_sec_context;
@@ -259,18 +291,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	bool isnull;
 	Datum datum;
 
-	/* Determine strength of lock needed. */
-	//concurrent = stmt->concurrent;
-	//lockmode = concurrent ? ExclusiveLock : AccessExclusiveLock;
-	lockmode = AccessExclusiveLock;
-
-	/*
-	 * Get a lock until end of transaction.
-	 */
-	matviewOid = RangeVarGetRelidExtended(relation,
-										  lockmode, 0,
-										  RangeVarCallbackOwnsTable, NULL);
-	matviewRel = table_open(matviewOid, lockmode);
+	matviewRel = table_open(matviewOid, NoLock);
 	relowner = matviewRel->rd_rel->relowner;
 
 	/*
@@ -282,8 +303,12 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	SetUserIdAndSecContext(relowner,
 						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
 	save_nestlevel = NewGUCNestLevel();
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
+	RestrictSearchPath();
+#endif
 
 	/*
+	 * Make sure it is an IMMV:
 	 * Get the entry in pg_ivm_immv. If it doesn't exist, the relation
 	 * is not IMMV.
 	 */
@@ -305,6 +330,15 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	datum = heap_getattr(tup, Anum_pg_ivm_immv_ispopulated, tupdesc, &isnull);
 	Assert(!isnull);
 	oldPopulated = DatumGetBool(datum);
+
+	/*
+	 * Check for active uses of the relation in the current transaction, such
+	 * as open scans.
+	 *
+	 * NB: We count on this to protect us against problems with refreshing the
+	 * data using TABLE_INSERT_FROZEN.
+	 */
+	CheckTableNotInUse(matviewRel, "refresh an IMMV");
 
 	/* Tentatively mark the IMMV as populated or not (this will roll back
 	 * if we fail later).
@@ -342,15 +376,6 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	/* For IMMV, we need to rewrite matview query */
 	if (!skipData)
 		dataQuery = rewriteQueryForIMMV(viewQuery,NIL);
-
-	/*
-	 * Check for active uses of the relation in the current transaction, such
-	 * as open scans.
-	 *
-	 * NB: We count on this to protect us against problems with refreshing the
-	 * data using TABLE_INSERT_FROZEN.
-	 */
-	CheckTableNotInUse(matviewRel, "refresh an IMMV");
 
 	tableSpace = matviewRel->rd_rel->reltablespace;
 	relpersistence = matviewRel->rd_rel->relpersistence;
@@ -452,8 +477,13 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 	if (!skipData)
 		pgstat_count_heap_insert(matviewRel, processed);
 
+	/*
+	 * Create triggers on incremental maintainable materialized view
+	 * This argument should use 'dataQuery'. This needs to use a rewritten query,
+	 * because a sublink in jointree is not supported by this function.
+	 */
 	if (!skipData && !oldPopulated)
-		CreateIvmTriggersOnBaseTables(viewQuery, matviewOid);
+		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid);
 
 	table_close(matviewRel, NoLock);
 
@@ -534,7 +564,7 @@ refresh_immv_datafill(DestReceiver *dest, Query *query,
 	ExecutorStart(queryDesc, 0);
 
 	/* run the plan */
-	ExecutorRun(queryDesc, ForwardScanDirection, 0L, true);
+	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
 
 	processed = queryDesc->estate->es_processed;
 
@@ -889,6 +919,9 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	SetUserIdAndSecContext(relowner,
 						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
 	save_nestlevel = NewGUCNestLevel();
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 170000)
+	RestrictSearchPath();
+#endif
 
 	/* get view query*/
 	query = get_immv_query(matviewRel);
