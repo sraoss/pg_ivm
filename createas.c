@@ -234,7 +234,6 @@ create_immv_nodata(List *tlist, IntoClause *into)
  */
 ObjectAddress
 ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-				  ParamListInfo params, QueryEnvironment *queryEnv,
 				  QueryCompletion *qc)
 {
 	Query	   *query = castNode(Query, stmt->query);
