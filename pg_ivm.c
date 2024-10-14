@@ -25,6 +25,8 @@
 #include "parser/parser.h"
 #include "parser/scansup.h"
 #include "tcop/tcopprot.h"
+#include "nodes/makefuncs.h"
+#include "utils/syscache.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -36,8 +38,6 @@
 
 PG_MODULE_MAGIC;
 
-static Oid pg_ivm_immv_id = InvalidOid;
-static Oid pg_ivm_immv_pkey_id = InvalidOid;
 
 static object_access_hook_type PrevObjectAccessHook = NULL;
 
@@ -326,10 +326,9 @@ CreateChangePreventTrigger(Oid matviewOid)
 Oid
 PgIvmImmvRelationId(void)
 {
-	if (!OidIsValid(pg_ivm_immv_id))
-		pg_ivm_immv_id = get_relname_relid("pg_ivm_immv", PG_CATALOG_NAMESPACE);
-
-	return pg_ivm_immv_id;
+	return RangeVarGetRelidExtended(
+		makeRangeVar("pg_catalog", "pg_ivm_immv", -1),
+		AccessShareLock, RVR_MISSING_OK, NULL, NULL);
 }
 
 /*
@@ -338,10 +337,9 @@ PgIvmImmvRelationId(void)
 Oid
 PgIvmImmvPrimaryKeyIndexId(void)
 {
-	if (!OidIsValid(pg_ivm_immv_pkey_id))
-		pg_ivm_immv_pkey_id = get_relname_relid("pg_ivm_immv_pkey", PG_CATALOG_NAMESPACE);
-
-	return pg_ivm_immv_pkey_id;
+	return RangeVarGetRelidExtended(
+		makeRangeVar("pg_catalog", "pg_ivm_immv_pkey", -1),
+		AccessShareLock, RVR_MISSING_OK, NULL, NULL);
 }
 
 /*
@@ -391,24 +389,23 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		HeapTuple tup;
 		Oid pgIvmImmvOid = PgIvmImmvRelationId();
 	
-		/* pg_ivm_immv is not created yet, so there are no IMMVs, either. */
-		if (pgIvmImmvOid == InvalidOid)
-			return;
+		Oid pgIvmImmvPkOid = PgIvmImmvPrimaryKeyIndexId();
 
 		/*
-		 * When the dropped table is pg_ivm_immv, we don't need to continue
-		 * any more. Also, in this case, the index on it is already dropped,
-		 * so the index scan below will fail and raise an error.
+		 * Index or table not yet created (so no IMMVs yet), already dropped
+		 * (expect IMMVs also gone soon), or renamed.  It's not great that a
+		 * rename of either object will silently break IMMVs, but that's
+  	 	 * better than ERROR below.
 		 */
-		if (objectId == pgIvmImmvOid)
-			return;
+		if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
+ 			return;
 		
 		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
 		ScanKeyInit(&key,
 					Anum_pg_ivm_immv_immvrelid,
 					BTEqualStrategyNumber, F_OIDEQ,
 					ObjectIdGetDatum(objectId));
-		scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+		scan = systable_beginscan(pgIvmImmv, pgIvmImmvPkOid,
 								  true, NULL, 1, &key);
 
 		tup = systable_getnext(scan);
