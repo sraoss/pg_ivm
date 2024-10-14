@@ -228,7 +228,7 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *)ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, NULL, NULL, &qc);
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }
