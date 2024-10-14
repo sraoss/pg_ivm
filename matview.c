@@ -41,6 +41,7 @@
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rowsecurity.h"
 #include "storage/lmgr.h"
+#include "tcop/deparse_utility.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -220,6 +221,7 @@ static void mv_BuildQueryKey(MV_QueryKey *key, Oid matview_id, int32 query_type)
 static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort);
 
 /* SQL callable functions */
+PG_FUNCTION_INFO_V1(changes_partitions);
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
 PG_FUNCTION_INFO_V1(IVM_immediate_maintenance);
 PG_FUNCTION_INFO_V1(ivm_visible_in_prestate);
@@ -683,12 +685,59 @@ tuplestore_copy(Tuplestorestate *tuplestore, Relation rel)
  */
 
 /*
- * IVM_immediate_before
+ * changes_partitions
  *
- * IVM trigger function invoked before base table is modified. If this is
- * invoked firstly in the same statement, we save the transaction id and the
- * command id at that time.
+ * Accepts a parsed ALTER TABLE command (from pg_event_trigger_ddl_commands),
+ * returning whether that ALTER TABLE command contains subcommands related to
+ * changing partitions (i.e. ATTACH or DETACH PARTITION).
  */
+Datum
+changes_partitions(PG_FUNCTION_ARGS)
+{
+	CollectedCommand *cmd = (CollectedCommand *) PG_GETARG_POINTER(0);
+	ListCell *subcmdCell = NULL;
+
+	CollectedATSubcmd *collAlterSubcmd = NULL;
+	AlterTableCmd *alterCmd = NULL;
+
+	Oid newPartRelid = InvalidOid;
+	Oid oldPartRelid = InvalidOid;
+
+	/* this function is intended for ALTER TABLE only */
+	if (cmd->type != SCT_AlterTable)
+	{
+		elog(ERROR, "command is not ALTER TABLE");
+	}
+
+	/* expect at least one sub-command */
+	subcmdCell = list_head(cmd->d.alterTable.subcmds);
+	if (subcmdCell == NULL)
+	{
+		elog(ERROR, "empty alter table subcommand list");
+	}
+
+	/*
+	 * This saves the OIDs of the affected partitions, for later use
+	 * in an incremental approach.
+	 */
+	collAlterSubcmd = lfirst(subcmdCell);
+	alterCmd = castNode(AlterTableCmd, collAlterSubcmd->parsetree);
+	if (alterCmd->subtype == AT_AttachPartition)
+	{
+		newPartRelid = collAlterSubcmd->address.objectId;
+	}
+	else if (alterCmd->subtype == AT_DetachPartition)
+	{
+		oldPartRelid = collAlterSubcmd->address.objectId;
+	}
+	else
+	{
+		return BoolGetDatum(false);
+	}
+
+	return BoolGetDatum(true);
+}
+
 Datum
 IVM_immediate_before(PG_FUNCTION_ARGS)
 {

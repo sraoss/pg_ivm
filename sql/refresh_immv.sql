@@ -37,3 +37,18 @@ SELECT refresh_immv('mv_not_existing', true);
 
 -- Try to refresh a normal table -- error
 SELECT refresh_immv('t', true);
+
+-- Create partitioned table
+CREATE TABLE foo (id integer) PARTITION BY RANGE(id);
+CREATE TABLE foo_default PARTITION OF foo DEFAULT;
+
+INSERT INTO foo VALUES (1), (2), (3);
+
+SELECT create_immv('foo_mv', 'SELECT COUNT(*) as count FROM foo');
+SELECT count FROM foo_mv;
+
+ALTER TABLE foo DETACH PARTITION foo_default;
+SELECT count FROM foo_mv;
+
+ALTER TABLE foo ATTACH PARTITION foo_default DEFAULT;
+SELECT count FROM foo_mv;
