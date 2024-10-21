@@ -1597,13 +1597,13 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 	{
 		RangeTblEntry *r = (RangeTblEntry*) lfirst(lc);
 		Bitmapset *key_attnos;
-		bool	has_pkey = true;
+		bool	has_no_pkey = false;
 
 		/* for subqueries, scan recursively */
 		if (r->rtekind == RTE_SUBQUERY)
 		{
 			key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList);
-			has_pkey = (key_attnos != NULL);
+			has_no_pkey = (key_attnos == NULL);
 		}
 		/* for tables, call get_primary_key_attnos */
 		else if (r->rtekind == RTE_RELATION)
@@ -1611,17 +1611,27 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 			Oid constraintOid;
 			key_attnos = get_primary_key_attnos(r->relid, false, &constraintOid);
 			*constraintList = lappend_oid(*constraintList, constraintOid);
-			has_pkey = (key_attnos != NULL);
+			has_no_pkey = (key_attnos == NULL);
 		}
-		/* for other RTEs, store NULL into key_attnos_list */
-		else
+		/*
+		 * Ignore join rels, because they are flatten later by
+		 * flatten_join_alias_vars(). Store NULL into key_attnos_list
+		 * as a dummy.
+		 */
+		else if (r->rtekind == RTE_JOIN)
+		{
 			key_attnos = NULL;
+		}
+		/* for other RTEs, we assume they have no candidate key */
+		else
+			has_no_pkey = true;
 
 		/*
-		 * If any table or subquery has no primary key or its pkey constraint is deferrable,
+		 * If any table or subquery has no primary key or its pkey constraint
+		 * is deferrable (i.e., get_primary_key_attnos returned NULL),
 		 * we cannot get key attributes for this query, so return NULL.
 		 */
-		if (!has_pkey)
+		if (has_no_pkey)
 			return NULL;
 
 		key_attnos_list = lappend(key_attnos_list, key_attnos);
