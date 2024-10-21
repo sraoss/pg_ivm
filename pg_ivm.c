@@ -326,9 +326,9 @@ CreateChangePreventTrigger(Oid matviewOid)
 Oid
 PgIvmImmvRelationId(void)
 {
-	return RangeVarGetRelidExtended(
+	return RangeVarGetRelid(
 		makeRangeVar("pg_catalog", "pg_ivm_immv", -1),
-		AccessShareLock, RVR_MISSING_OK, NULL, NULL);
+		AccessShareLock, true);
 }
 
 /*
@@ -337,9 +337,9 @@ PgIvmImmvRelationId(void)
 Oid
 PgIvmImmvPrimaryKeyIndexId(void)
 {
-	return RangeVarGetRelidExtended(
+	return RangeVarGetRelid(
 		makeRangeVar("pg_catalog", "pg_ivm_immv_pkey", -1),
-		AccessShareLock, RVR_MISSING_OK, NULL, NULL);
+		AccessShareLock, true);
 }
 
 /*
@@ -395,10 +395,10 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		 * Index or table not yet created (so no IMMVs yet), already dropped
 		 * (expect IMMVs also gone soon), or renamed.  It's not great that a
 		 * rename of either object will silently break IMMVs, but that's
-  	 	 * better than ERROR below.
+		 * better than ERROR below.
 		 */
 		if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
- 			return;
+			return;
 		
 		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
 		ScanKeyInit(&key,
