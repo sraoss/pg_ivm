@@ -1,0 +1,1 @@
+ALTER EXTENSION pg_ivm SET SCHEMA pg_ivm;
