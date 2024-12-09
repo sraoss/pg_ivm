@@ -11,8 +11,6 @@ CREATE TABLE __pg_ivm__.pg_ivm_immv(
 
 ALTER TABLE __pg_ivm__.pg_ivm_immv SET SCHEMA pg_catalog;
 
---CREATE UNIQUE INDEX ON pg_catalog.pg_ivm_immv USING btree (immvrelid);
-
 SELECT pg_catalog.pg_extension_config_dump('pg_catalog.pg_ivm_immv', '');
 
 -- functions
@@ -44,7 +42,7 @@ LANGUAGE C;
 /*
  * DDL trigger that removes entry from pg_ivm_immv
  */
-CREATE FUNCTION pg_ivm_sql_drop_trigger_func()
+CREATE FUNCTION pg_catalog.pg_ivm_sql_drop_trigger_func()
 RETURNS event_trigger AS $$
 DECLARE
 	pg_class_oid	OID;
