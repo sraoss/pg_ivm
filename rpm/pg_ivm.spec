@@ -1,6 +1,6 @@
 # How to build RPM:
 #
-#   rpmbuild -bb pg_ivm.spec --define "pgmajorversion 14" --define "pginstdir /usr/pgsql-14"
+#   rpmbuild -bb pg_ivm.spec --define "pgmajorversion 17" --define "pginstdir /usr/pgsql-17"
 
 %global sname pg_ivm
 
@@ -10,7 +10,7 @@
 
 Summary:	PostgreSQL-based distributed RDBMS
 Name:		%{sname}_%{pgmajorversion}
-Version:	1.9
+Version:	1.10
 Release:	1%{dist}
 License:    BSD
 Vendor:     IVM Development Group
@@ -55,6 +55,8 @@ PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot
 %endif
 
 %changelog
+* xxxxx - Yugo Nagata <nagata@sraoss.co.jp> 1.10-1
+- Update to 1.10
 * Fri Jul 31 2024 - Yugo Nagata <nagata@sraoss.co.jp> 1.9-1
 - Update to 1.9
 * Fri Mar 1 2024 - Yugo Nagata <nagata@sraoss.co.jp> 1.8-1
