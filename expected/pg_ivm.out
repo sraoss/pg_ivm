@@ -1663,9 +1663,19 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
            0
 (1 row)
 
---- subqueries
+--- subqueries: create an index
 SELECT create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
 NOTICE:  created index "mv_idx6_index" on immv "mv_idx6"
+ create_immv 
+-------------
+           0
+(1 row)
+
+--- with set-returning function: no index
+SELECT create_immv('mv_idx7', 'SELECT i FROM base_a, generate_series(1,10)');
+NOTICE:  could not create an index on immv "mv_idx7" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            0
