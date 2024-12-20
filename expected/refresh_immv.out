@@ -116,3 +116,33 @@ ERROR:  relation "mv_not_existing" does not exist
 -- Try to refresh a normal table -- error
 SELECT refresh_immv('t', true);
 ERROR:  "t" is not an IMMV
+-- Create partitioned table
+CREATE TABLE foo (id integer) PARTITION BY RANGE(id);
+CREATE TABLE foo_default PARTITION OF foo DEFAULT;
+INSERT INTO foo VALUES (1), (2), (3);
+SELECT create_immv('foo_mv', 'SELECT COUNT(*) as count FROM foo');
+ create_immv 
+-------------
+           1
+(1 row)
+
+SELECT count FROM foo_mv;
+ count 
+-------
+     3
+(1 row)
+
+ALTER TABLE foo DETACH PARTITION foo_default;
+SELECT count FROM foo_mv;
+ count 
+-------
+     0
+(1 row)
+
+ALTER TABLE foo ATTACH PARTITION foo_default DEFAULT;
+SELECT count FROM foo_mv;
+ count 
+-------
+     3
+(1 row)
+
