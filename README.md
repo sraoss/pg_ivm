@@ -94,7 +94,7 @@ When an IMMV is created, some triggers are automatically created so that the vie
 
 Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
-#### refresh_imm
+#### refresh_immv
 
 Use `refresh_immv` function to refresh IMMV.
 ```
