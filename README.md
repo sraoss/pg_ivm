@@ -177,7 +177,7 @@ test=# SELECT * FROM immv WHERE aid = 1;
 (1 row)
 ```
 
-An appropriate index on IMMV is necessary for efficient IVM because we need to looks for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
+An appropriate index on IMMV is necessary for efficient IVM because we need to look for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
 
 Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible. If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
 
@@ -248,7 +248,7 @@ Recursive queries (`WITH RECURSIVE`) are not allowed. Unreferenced CTEs are not 
 
 `DISTINCT` is allowed in IMMV's definition queries. Suppose an IMMV defined with DISTINCT on a base table containing duplicate tuples.  When tuples are deleted from the base table, a tuple in the view is deleted if and only if the multiplicity of the tuple becomes zero.  Moreover, when tuples are inserted into the base table, a tuple is inserted into the view only if the same tuple doesn't already exist in it.
 
-Physically, an IMMV defined with `DISTINCT` contains tuples after eliminating duplicates, and the multiplicity of each tuple is stored in a extra column named `__ivm_count__` that is added when such IMMV is created.
+Physically, an IMMV defined with `DISTINCT` contains tuples after eliminating duplicates, and the multiplicity of each tuple is stored in an extra column named `__ivm_count__` that is added when such IMMV is created.
 
 ### TRUNCATE
 
@@ -257,7 +257,7 @@ When a base table is truncated, the IMMV is also truncated and the contents beco
 
 ### Concurrent Transactions
 
-Suppose an IMMV is defined on two base tables and each table was modified in different a concurrent transaction simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change which happened in this transaction. On the other hand, in order to update the IMMV correctly in the transaction which was committed later, we need to know the changes occurred in both transactions.  For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` mode to make sure that the IMMV is updated in the latter transaction after the former transaction is committed.  In `REPEATABLE READ` or `SERIALIZABLE` mode, an error is raised immediately if lock acquisition fails because any changes which occurred in other transactions are not be visible in these modes and IMMV cannot be updated correctly in such situations. However, as an exception if the IMMV has only one base table and doesn't use DISTINCT or GROUP BY, and the table is modified by `INSERT`, then the lock held on the IMMV is `RowExclusiveLock`.
+Suppose an IMMV is defined on two base tables and each table was modified in different a concurrent transaction simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change which happened in this transaction. On the other hand, in order to update the IMMV correctly in the transaction which was committed later, we need to know the changes occurred in both transactions.  For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` mode to make sure that the IMMV is updated in the latter transaction after the former transaction is committed.  In `REPEATABLE READ` or `SERIALIZABLE` mode, an error is raised immediately if lock acquisition fails because any changes which occurred in other transactions are not visible in these modes and IMMV cannot be updated correctly in such situations. However, as an exception if the IMMV has only one base table and doesn't use DISTINCT or GROUP BY, and the table is modified by `INSERT`, then the lock held on the IMMV is `RowExclusiveLock`.
 
 ### Row Level Security
 
