@@ -91,7 +91,7 @@ _PG_init(void)
 
 /*
  * Given a C string, parse it into a qualified relation name
- * followed by a optional parenthesized list of column names.
+ * followed by an optional parenthesized list of column names.
  */
 static void
 parseNameAndColumns(const char *string, List **names, List **colNames)
@@ -201,7 +201,7 @@ create_immv(PG_FUNCTION_ARGS)
 
 	parsetree = linitial_node(RawStmt, parsetree_list);
 
-	/* view definition should spcify SELECT query */
+	/* view definition should specify SELECT query */
 	if (!IsA(parsetree->stmt, SelectStmt))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
