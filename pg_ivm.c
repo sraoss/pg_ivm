@@ -343,7 +343,7 @@ PgIvmImmvPrimaryKeyIndexId(void)
 }
 
 /*
- * Return the SELECT part of a IMMV
+ * Return the SELECT part of an IMMV
  */
 Datum
 get_immv_def(PG_FUNCTION_ARGS)
@@ -421,7 +421,7 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 /*
  * isImmv
  *
- * Check if this is a IMMV from oid.
+ * Check if this is an IMMV from oid.
  */
 bool
 isImmv(Oid immv_oid)
