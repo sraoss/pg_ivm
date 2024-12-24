@@ -3272,7 +3272,7 @@ getColumnNameStartWith(RangeTblEntry *rte, char *str, int *attnum)
 /*
  * isIvmName
  *
- * Check if this is a IVM hidden column from the name.
+ * Check if this is an IVM hidden column from the name.
  */
 bool
 isIvmName(const char *s)
