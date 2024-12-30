@@ -2390,7 +2390,7 @@ get_null_condition_string(IvmOp op, const char *arg1, const char *arg2,
 /*
  * apply_old_delta_with_count
  *
- * Execute a query for applying a delta table given by deltname_old
+ * Execute a query for applying a delta table given by deltaname_old
  * which contains tuples to be deleted from to a materialized view given by
  * matviewname.  This is used when counting is required, that is, the view
  * has aggregate or distinct. Also, when a table in EXISTS sub queries
@@ -2486,7 +2486,7 @@ apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
 /*
  * apply_old_delta
  *
- * Execute a query for applying a delta table given by deltname_old
+ * Execute a query for applying a delta table given by deltaname_old
  * which contains tuples to be deleted from to a materialized view given by
  * matviewname.  This is used when counting is not required.
  */
@@ -2535,7 +2535,7 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 /*
  * apply_new_delta_with_count
  *
- * Execute a query for applying a delta table given by deltname_new
+ * Execute a query for applying a delta table given by deltaname_new
  * which contains tuples to be inserted into a materialized view given by
  * matviewname.  This is used when counting is required, that is, the view
  * has aggregate or distinct. Also, when a table in EXISTS sub queries
@@ -2621,7 +2621,7 @@ apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 /*
  * apply_new_delta
  *
- * Execute a query for applying a delta table given by deltname_new
+ * Execute a query for applying a delta table given by deltaname_new
  * which contains tuples to be inserted into a materialized view given by
  * matviewname.  This is used when counting is not required.
  */
