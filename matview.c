@@ -2391,7 +2391,7 @@ get_null_condition_string(IvmOp op, const char *arg1, const char *arg2,
  * apply_old_delta_with_count
  *
  * Execute a query for applying a delta table given by deltaname_old
- * which contains tuples to be deleted from to a materialized view given by
+ * which contains tuples to be deleted from a materialized view given by
  * matviewname.  This is used when counting is required, that is, the view
  * has aggregate or distinct. Also, when a table in EXISTS sub queries
  * is modified.
@@ -2487,7 +2487,7 @@ apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
  * apply_old_delta
  *
  * Execute a query for applying a delta table given by deltaname_old
- * which contains tuples to be deleted from to a materialized view given by
+ * which contains tuples to be deleted from a materialized view given by
  * matviewname.  This is used when counting is not required.
  */
 static void
