@@ -2603,7 +2603,7 @@ apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 						"FROM %s AS diff "
 						"WHERE %s "					/* tuple matching condition */
 						"RETURNING %s"				/* returning keys of updated tuples */
-					") INSERT INTO %s (%s)"	/* insert a new tuple if this doesn't existw */
+					") INSERT INTO %s (%s)"	/* insert a new tuple if this doesn't exist */
 						"SELECT %s FROM %s AS diff "
 						"WHERE NOT EXISTS (SELECT 1 FROM updt AS mv WHERE %s);",
 					matviewname, count_colname, count_colname, count_colname,
