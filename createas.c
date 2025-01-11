@@ -896,10 +896,6 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("TABLESAMPLE clause is not supported on incrementally maintainable materialized view")));
 
-					if (rte->relkind == RELKIND_PARTITIONED_TABLE)
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("partitioned table is not supported on incrementally maintainable materialized view")));
 
 					if (rte->relkind == RELKIND_RELATION && has_superclass(rte->relid))
 						ereport(ERROR,
