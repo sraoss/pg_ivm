@@ -269,10 +269,11 @@ IVM is effective when we want to keep an IMMV up-to-date and small fraction of a
 
 In such situation, we can use `refresh_immv` function with `with_data = false` to disable immediate maintenance before modifying a base table. After a base table modification, call `refresh_immv`with `with_data = true` to refresh the view data and enable immediate maintenance.
 
-## Authors
+## Developer
 IVM Development Group
-- https://github.com/yugo-n
-- https://github.com/thoshiai
+- Original Authors
+  - https://github.com/yugo-n
+  - https://github.com/thoshiai
 
 ## License
 [PostgreSQL License](https://github.com/sraoss/pg_ivm/blob/main/LICENSE)
