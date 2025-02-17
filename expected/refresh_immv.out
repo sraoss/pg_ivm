@@ -1,26 +1,26 @@
 CREATE TABLE t (i int PRIMARY KEY);
 INSERT INTO t SELECT generate_series(1, 5);
-SELECT create_immv('mv', 'SELECT * FROM t');
+SELECT pgivm.create_immv('mv', 'SELECT * FROM t');
 NOTICE:  created index "mv_index" on immv "mv"
  create_immv 
 -------------
            5
 (1 row)
 
-SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, ispopulated FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid | ispopulated 
 -----------+-------------
  mv        | t
 (1 row)
 
 -- Refresh IMMV with data
-SELECT refresh_immv('mv', true);
+SELECT pgivm.refresh_immv('mv', true);
  refresh_immv 
 --------------
             5
 (1 row)
 
-SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, ispopulated FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid | ispopulated 
 -----------+-------------
  mv        | t
@@ -39,13 +39,13 @@ SELECT i FROM mv ORDER BY 1;
 (6 rows)
 
 -- Make IMMV unpopulated
-SELECT refresh_immv('mv', false);
+SELECT pgivm.refresh_immv('mv', false);
  refresh_immv 
 --------------
             0
 (1 row)
 
-SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, ispopulated FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid | ispopulated 
 -----------+-------------
  mv        | f
@@ -64,13 +64,13 @@ SELECT i FROM mv ORDER BY 1;
 (0 rows)
 
 -- Refresh the IMMV and make it populated.
-SELECT refresh_immv('mv', true);
+SELECT pgivm.refresh_immv('mv', true);
  refresh_immv 
 --------------
             7
 (1 row)
 
-SELECT immvrelid, ispopulated FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, ispopulated FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid | ispopulated 
 -----------+-------------
  mv        | t
@@ -104,15 +104,15 @@ SELECT i FROM mv ORDER BY 1;
 (8 rows)
 
 -- Use qualified name
-SELECT refresh_immv('public.mv', true);
+SELECT pgivm.refresh_immv('public.mv', true);
  refresh_immv 
 --------------
             8
 (1 row)
 
 -- Use not existing IMMV
-SELECT refresh_immv('mv_not_existing', true);
+SELECT pgivm.refresh_immv('mv_not_existing', true);
 ERROR:  relation "mv_not_existing" does not exist
 -- Try to refresh a normal table -- error
-SELECT refresh_immv('t', true);
+SELECT pgivm.refresh_immv('t', true);
 ERROR:  "t" is not an IMMV

@@ -297,7 +297,7 @@ CreateChangePreventTrigger(Oid matviewOid)
 
 	ivm_trigger->timing = TRIGGER_TYPE_BEFORE;
 	ivm_trigger->trigname = "IVM_prevent_immv_change";
-	ivm_trigger->funcname = SystemFuncName("IVM_prevent_immv_change");
+	ivm_trigger->funcname = PgIvmFuncName("IVM_prevent_immv_change");
 	ivm_trigger->columns = NIL;
 	ivm_trigger->transitionRels = NIL;
 	ivm_trigger->whenClause = NULL;
@@ -327,7 +327,7 @@ Oid
 PgIvmImmvRelationId(void)
 {
 	return RangeVarGetRelid(
-		makeRangeVar("pg_catalog", "pg_ivm_immv", -1),
+		makeRangeVar("pgivm", "pg_ivm_immv", -1),
 		AccessShareLock, true);
 }
 
@@ -338,7 +338,7 @@ Oid
 PgIvmImmvPrimaryKeyIndexId(void)
 {
 	return RangeVarGetRelid(
-		makeRangeVar("pg_catalog", "pg_ivm_immv_pkey", -1),
+		makeRangeVar("pgivm", "pg_ivm_immv_pkey", -1),
 		AccessShareLock, true);
 }
 
@@ -446,4 +446,13 @@ isImmv(Oid immv_oid)
 		return false;
 	else
 		return true;
+}
+
+/* PgIvmFuncName()
+ * Build a properly-qualified reference to a pg_ivm internal function.
+ */
+List *
+PgIvmFuncName(char *name)
+{
+    return list_make2(makeString("pgivm"), makeString(name));
 }

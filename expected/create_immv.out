@@ -1,22 +1,22 @@
 CREATE TABLE t (i int PRIMARY KEY);
 INSERT INTO t SELECT generate_series(1, 100);
-SELECT create_immv('mv', 'SELECT * FROM t');
+SELECT pgivm.create_immv('mv', 'SELECT * FROM t');
 NOTICE:  created index "mv_index" on immv "mv"
  create_immv 
 -------------
          100
 (1 row)
 
-SELECT create_immv(' mv2 ( x  ) ', 'SELECT * FROM t WHERE i%2 = 0');
+SELECT pgivm.create_immv(' mv2 ( x  ) ', 'SELECT * FROM t WHERE i%2 = 0');
 NOTICE:  created index "mv2_index" on immv "mv2"
  create_immv 
 -------------
           50
 (1 row)
 
-SELECT create_immv('mv3', 'WITH d AS (DELETE FROM t RETURNING NULL) SELECT * FROM t');
+SELECT pgivm.create_immv('mv3', 'WITH d AS (DELETE FROM t RETURNING NULL) SELECT * FROM t');
 ERROR:  materialized views must not use data-modifying statements in WITH
-SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, pgivm.get_immv_def(immvrelid) FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid |     get_immv_def      
 -----------+-----------------------
  mv        |  SELECT i            +
@@ -27,20 +27,20 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
 (2 rows)
 
 -- contain immv
-SELECT create_immv('mv_in_immv01', 'SELECT i FROM mv');
+SELECT pgivm.create_immv('mv_in_immv01', 'SELECT i FROM mv');
 ERROR:  including IMMV in definition is not supported on incrementally maintainable materialized view
-SELECT create_immv('mv_in_immv02', 'SELECT t.i FROM t INNER JOIN mv2 ON t.i = mv2.x');
+SELECT pgivm.create_immv('mv_in_immv02', 'SELECT t.i FROM t INNER JOIN mv2 ON t.i = mv2.x');
 ERROR:  including IMMV in definition is not supported on incrementally maintainable materialized view
 -- SQL other than SELECT
-SELECT create_immv('mv_in_create', 'CREATE TABLE in_create(i int)');
+SELECT pgivm.create_immv('mv_in_create', 'CREATE TABLE in_create(i int)');
 ERROR:  view definition must specify SELECT statement
-SELECT create_immv('mv_in_insert', 'INSERT INTO t VALUES(10)');
+SELECT pgivm.create_immv('mv_in_insert', 'INSERT INTO t VALUES(10)');
 ERROR:  view definition must specify SELECT statement
-SELECT create_immv('mv_in_update', 'UPDATE t SET i = 10');
+SELECT pgivm.create_immv('mv_in_update', 'UPDATE t SET i = 10');
 ERROR:  view definition must specify SELECT statement
-SELECT create_immv('mv_in_delete', 'DELETE FROM t');
+SELECT pgivm.create_immv('mv_in_delete', 'DELETE FROM t');
 ERROR:  view definition must specify SELECT statement
-SELECT create_immv('mv_in_drop', 'DROP TABLE t');
+SELECT pgivm.create_immv('mv_in_drop', 'DROP TABLE t');
 ERROR:  view definition must specify SELECT statement
 DROP TABLE t;
 ERROR:  cannot drop table t because other objects depend on it
@@ -48,7 +48,7 @@ DETAIL:  table mv depends on table t
 table mv2 depends on table t
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 DROP TABLE mv;
-SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, pgivm.get_immv_def(immvrelid) FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid |     get_immv_def      
 -----------+-----------------------
  mv2       |  SELECT i AS x       +
@@ -57,7 +57,7 @@ SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
 (1 row)
 
 DROP TABLE mv2;
-SELECT immvrelid, get_immv_def(immvrelid) FROM pg_ivm_immv ORDER BY 1;
+SELECT immvrelid, pgivm.get_immv_def(immvrelid) FROM pgivm.pg_ivm_immv ORDER BY 1;
  immvrelid | get_immv_def 
 -----------+--------------
 (0 rows)

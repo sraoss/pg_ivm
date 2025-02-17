@@ -13,7 +13,7 @@ There are two approaches with regard to timing of view maintenance: immediate an
 We call a materialized view supporting IVM an **Incrementally Maintainable Materialized View (IMMV)**. To create IMMV, you have to call `create_immv` function with a relation name and a view definition query. For example:
 
 ```sql
-SELECT create_immv('myview', 'SELECT * FROM mytab');
+SELECT pgivm.create_immv('myview', 'SELECT * FROM mytab');
 ```
 
 creates an IMMV with name 'myview' defined as `SELECT * FROM mytab`. This is corresponding to the following command to create a normal materialized view;
@@ -25,7 +25,7 @@ CREATE MATERIALIZED VIEW myview AS SELECT * FROM mytab;
 When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified.
 
 ```sql
-postgres=# SELECT create_immv('m', 'SELECT * FROM t0');
+postgres=# SELECT pgivm.create_immv('m', 'SELECT * FROM t0');
 NOTICE:  could not create an index on immv "m" automatically
 DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
 HINT:  Create an index on the immv for efficient incremental maintenance.
@@ -57,6 +57,7 @@ postgres=# SELECT * FROM m; -- automatically updated
 Note that if you use PostgreSQL 17 or later, during automatic maintenance of an IMMV, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
 ## Installation
+
 To install `pg_ivm`, execute this in the module's directory:
 
 ```shell
@@ -69,16 +70,17 @@ If you installed PostgreSQL from rpm or deb, you will need the devel package (fo
 
 And, execute CREATE EXTENSION comand.
 
-```
+```sql
 CREATE EXTENSION pg_ivm;
 ```
+
 ### RPM packages and yum repository
 
 RPM packages of pg_ivm are available from the [PostgreSQL yum repository](https://yum.postgresql.org/). See the [instruction](https://yum.postgresql.org/howto/) for details. Note that we are not the maintainer of this yum repository and RPMs for pg_ivm in it may be not always latest.
 
 ## Objects
 
-When `pg_ivm` is installed, the following objects are created.
+When `pg_ivm` is installed, the following objects are created in the schema `pgivm`.
 
 ### Functions
 
@@ -86,7 +88,7 @@ When `pg_ivm` is installed, the following objects are created.
 
 Use `create_immv` function to create IMMV.
 ```
-create_immv(immv_name text, view_definition text) RETURNS bigint
+pgivim.create_immv(immv_name text, view_definition text) RETURNS bigint
 ```
 `create_immv` defines a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
@@ -98,7 +100,7 @@ Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the
 
 Use `refresh_immv` function to refresh IMMV.
 ```
-refresh_immv(immv_name text, with_data bool) RETURNS bigint
+pgivm.refresh_immv(immv_name text, with_data bool) RETURNS bigint
 ```
 
 `refresh_immv` completely replaces the contents of an IMMV as `REFRESH MATERIALIZED VIEW` command does for a materialized view. To execute this function you must be the owner of the IMMV (with PostgreSQL 16 or earlier) or have the `MAINTAIN` privilege on the IMMV (with PostgreSQL 17 or later).  The old contents are discarded.
@@ -111,12 +113,12 @@ Note that if you use PostgreSQL 17 or later, while `refresh_immv` is running, th
 
 `get_immv_def` reconstructs the underlying SELECT command for an IMMV. (This is a decompiled reconstruction, not the original text of the command.)
 ```
-get_immv_def(immv regclass) RETURNS text
+pgivm.get_immv_def(immv regclass) RETURNS text
 ```
 
 ### IMMV metadata catalog
 
-The catalog `pg_ivm_immv` stores IMMV information.
+The catalog `pgivm.pg_ivm_immv` stores IMMV information.
 
 |Name|Type|Description|
 |:---|:---|:---|
@@ -153,7 +155,7 @@ Time: 20575.721 ms (00:20.576)
 On the other hand, after creating IMMV with the same view definition as below:
 
 ```
-test=# SELECT create_immv('immv',
+test=# SELECT pgivm.create_immv('immv',
         'SELECT a.aid, b.bid, a.abalance, b.bbalance
          FROM pgbench_accounts a JOIN pgbench_branches b USING(bid)');
 NOTICE:  created index "immv_index" on immv "immv"

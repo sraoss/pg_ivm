@@ -734,7 +734,8 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 		ex_lock = true;
 
 	ivm_trigger->funcname =
-		(timing == TRIGGER_TYPE_BEFORE ? SystemFuncName("IVM_immediate_before") : SystemFuncName("IVM_immediate_maintenance"));
+		(timing == TRIGGER_TYPE_BEFORE ?
+			PgIvmFuncName("IVM_immediate_before") : PgIvmFuncName("IVM_immediate_maintenance"));
 
 	ivm_trigger->columns = NIL;
 	ivm_trigger->transitionRels = transitionRels;
