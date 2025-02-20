@@ -159,11 +159,12 @@ static void CloseImmvIncrementalMaintenance(void);
 static Query *rewrite_query_for_preupdate_state(Query *query, List *tables,
 								  ParseState *pstate, List *rte_path, Oid matviewid);
 static void register_delta_ENRs(ParseState *pstate, Query *query, List *tables);
+static char*make_subquery_targetlist_from_table(MV_TriggerTable *table);
 static char *make_delta_enr_name(const char *prefix, Oid relid, int count);
 static RangeTblEntry *get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 				 QueryEnvironment *queryEnv, Oid matviewid);
-static RangeTblEntry *union_ENRs(RangeTblEntry *rte, Oid relid, List *enr_rtes, const char *prefix,
-		   QueryEnvironment *queryEnv);
+static RangeTblEntry *union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
+		   const char *prefix, QueryEnvironment *queryEnv);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
 static void calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
@@ -852,6 +853,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		table->new_rtes = NIL;
 		table->rte_paths = NIL;
 		table->slot = MakeSingleTupleTableSlot(RelationGetDescr(rel), table_slot_callbacks(rel));
+		/* We assume we have at least RowExclusiveLock on modified tables. */
 		table->rel = table_open(RelationGetRelid(rel), NoLock);
 		entry->tables = lappend(entry->tables, table);
 
@@ -1257,6 +1259,7 @@ rewrite_query_for_preupdate_state(Query *query, List *tables,
 					lfirst(lc) = rte_pre;
 
 					table->rte_paths = lappend(table->rte_paths, lappend_int(list_copy(rte_path), i));
+
 					break;
 				}
 			}
@@ -1400,24 +1403,20 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	StringInfoData str;
 	RawStmt *raw;
 	Query *subquery;
-	Relation rel;
 	ParseState *pstate;
 	char *relname;
+	static char *subquery_tl;
 	int i;
 
 	pstate = make_parsestate(NULL);
 	pstate->p_queryEnv = queryEnv;
 	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
-	/*
-	 * We can use NoLock here since AcquireRewriteLocks should
-	 * have locked the relation already.
-	 */
-	rel = table_open(table->table_id, NoLock);
 	relname = quote_qualified_identifier(
-					get_namespace_name(RelationGetNamespace(rel)),
-									   RelationGetRelationName(rel));
-	table_close(rel, NoLock);
+					get_namespace_name(RelationGetNamespace(table->rel)),
+									   RelationGetRelationName(table->rel));
+
+	subquery_tl = make_subquery_targetlist_from_table(table);
 
 	/*
 	 * Filtering inserted row using the snapshot taken before the table
@@ -1425,9 +1424,9 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	 */
 	initStringInfo(&str);
 	appendStringInfo(&str,
-		"SELECT t.* FROM %s t"
+		"SELECT %s FROM %s t"
 		" WHERE pgivm.ivm_visible_in_prestate(t.tableoid, t.ctid, %d::pg_catalog.oid)",
-			relname, matviewid);
+			subquery_tl, relname, matviewid);
 
 	/*
 	 * Append deleted rows contained in old transition tables.
@@ -1435,8 +1434,8 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	for (i = 0; i < list_length(table->old_tuplestores); i++)
 	{
 		appendStringInfo(&str, " UNION ALL ");
-		appendStringInfo(&str," SELECT * FROM %s",
-			make_delta_enr_name("old", table->table_id, i));
+		appendStringInfo(&str," SELECT %s FROM %s",
+			subquery_tl, make_delta_enr_name("old", table->table_id, i));
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1476,6 +1475,45 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 }
 
 /*
+ * make_subquery_targetlist_from_table
+ *
+ * Make a targetlist string of a subquery representing a delta table or a
+ * pre-update state table. This subquery substitutes a modified table RTE
+ * in the view definition query during view maintenance. In the targetlist,
+ * column names appear in order of the table definition. However, for
+ * attribute numbers of vars in the query tree to reference columns of the
+ * subquery  correctly even though the table has a dropped column, put "null"
+ * as a dummy value at the position of a dropped column.
+ *
+ * We would also able to walk the query tree to rewrite varattnos, but
+ * crafting targetlist is more simple and reasonable.
+ */
+static char*
+make_subquery_targetlist_from_table(MV_TriggerTable *table)
+{
+	StringInfoData str;
+	TupleDesc	tupdesc;
+	int			i;
+
+	tupdesc = RelationGetDescr(table->rel);
+	initStringInfo(&str);
+	for (i = 0; i < tupdesc->natts; i++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+		if (i > 0)
+			appendStringInfo(&str, ", ");
+
+		if (attr->attisdropped)
+			appendStringInfo(&str, "null");
+		else
+			appendStringInfo(&str, "%s", NameStr(attr->attname));
+	}
+
+	return str.data;
+}
+
+/*
  * make_delta_enr_name
  *
  * Make a name for ENR of a transition table from the base table's oid.
@@ -1500,8 +1538,8 @@ make_delta_enr_name(const char *prefix, Oid relid, int count)
  * all transition tables.
  */
 static RangeTblEntry*
-union_ENRs(RangeTblEntry *rte, Oid relid, List *enr_rtes, const char *prefix,
-		   QueryEnvironment *queryEnv)
+union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
+		   const char *prefix, QueryEnvironment *queryEnv)
 {
 	StringInfoData str;
 	ParseState	*pstate;
@@ -1518,15 +1556,15 @@ union_ENRs(RangeTblEntry *rte, Oid relid, List *enr_rtes, const char *prefix,
 	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
 	initStringInfo(&str);
-
 	for (i = 0; i < list_length(enr_rtes); i++)
 	{
 		if (i > 0)
 			appendStringInfo(&str, " UNION ALL ");
 
 		appendStringInfo(&str,
-			" SELECT * FROM %s",
-			make_delta_enr_name(prefix, relid, i));
+			" SELECT %s FROM %s",
+			make_subquery_targetlist_from_table(table),
+			make_delta_enr_name(prefix, table->table_id, i));
 	}
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
@@ -1804,7 +1842,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	if (list_length(table->old_rtes) > 0)
 	{
 		/* Replace the modified table with the old delta table and calculate the old view delta. */
-		lfirst(lc) = union_ENRs(rte, table->table_id, table->old_rtes, "old", queryEnv);
+		lfirst(lc) = union_ENRs(rte, table, table->old_rtes, "old", queryEnv);
 		refresh_immv_datafill(dest_old, query, queryEnv, tupdesc_old, "");
 	}
 
@@ -1812,7 +1850,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	if (list_length(table->new_rtes) > 0)
 	{
 		/* Replace the modified table with the new delta table and calculate the new view delta*/
-		lfirst(lc) = union_ENRs(rte, table->table_id, table->new_rtes, "new", queryEnv);
+		lfirst(lc) = union_ENRs(rte, table, table->new_rtes, "new", queryEnv);
 		refresh_immv_datafill(dest_new, query, queryEnv, tupdesc_new, "");
 	}
 

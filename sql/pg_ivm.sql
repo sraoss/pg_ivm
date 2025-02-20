@@ -2,14 +2,21 @@ CREATE EXTENSION pg_ivm;
 GRANT ALL ON SCHEMA public TO public;
 
 -- create a table to use as a basis for views and materialized views in various combinations
-CREATE TABLE mv_base_a (i int, j int);
+CREATE TABLE mv_base_a (x int, i int, y int, j int);
+CREATE TABLE mv_base_b (x int, i int, y int, k int);
+
+-- test for base tables with dropped columns
+ALTER TABLE mv_base_a DROP COLUMN x;
+ALTER TABLE mv_base_a DROP COLUMN y;
+ALTER TABLE mv_base_b DROP COLUMN x;
+ALTER TABLE mv_base_b DROP COLUMN y;
+
 INSERT INTO mv_base_a VALUES
   (1,10),
   (2,20),
   (3,30),
   (4,40),
   (5,50);
-CREATE TABLE mv_base_b (i int, k int);
 INSERT INTO mv_base_b VALUES
   (1,101),
   (2,102),
