@@ -1,0 +1,329 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 create s2 insert c1 check2 c2 mv
+step s1: SELECT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2); <waiting ...>
+step c1: COMMIT;
+step insert: <... completed>
+ERROR:  could not serialize access due to read/write dependencies among transactions
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 create s2 c1 insert check2 c2 mv
+step s1: SELECT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step s2: SELECT;
+step c1: COMMIT;
+step insert: INSERT INTO a VALUES (2);
+ERROR:  could not serialize access due to read/write dependencies among transactions
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 create insert c1 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step insert: INSERT INTO a VALUES (2); <waiting ...>
+step c1: COMMIT;
+step insert: <... completed>
+ERROR:  could not serialize access due to read/write dependencies among transactions
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 insert create c2 check1 c1 mv
+step s1: SELECT;
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+ <waiting ...>
+step c2: COMMIT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: <... completed>
+create_immv
+-----------
+          1
+(1 row)
+
+step check1: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ng      
+(1 row)
+
+
+starting permutation: s1 s2 create c1 insert check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step c1: COMMIT;
+step insert: INSERT INTO a VALUES (2);
+ERROR:  could not serialize access due to read/write dependencies among transactions
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 insert s1 create c2 check1 c1 mv
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step s1: SELECT;
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+ <waiting ...>
+step c2: COMMIT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: <... completed>
+create_immv
+-----------
+          1
+(1 row)
+
+step check1: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ng      
+(1 row)
+
+
+starting permutation: s2 insert s1 c2 create check1 c1 mv
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step s1: SELECT;
+step c2: COMMIT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step check1: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ng      
+(1 row)
+
+
+starting permutation: s2 s1 insert c2 create check1 c1 mv
+step s2: SELECT;
+step s1: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step c2: COMMIT;
+tx1: NOTICE:  could not create an index on immv "mv" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
+DETAIL:  The view may not include effects of a concurrent transaction.
+HINT:  create_immv should be used in isolation level READ COMMITTED, or execute refresh_immv to make sure the view is consistent.
+step create: 
+	SELECT pgivm.create_immv('mv(x,y)', 'SELECT * FROM a a1, a a2 WHERE a1.i = a2.i');
+	CREATE FUNCTION check_mv() RETURNS text AS
+		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
+			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+
+create_immv
+-----------
+          1
+(1 row)
+
+step check1: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ng      
+(1 row)
+

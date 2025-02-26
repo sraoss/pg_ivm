@@ -285,7 +285,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	{
 		Relation matviewRel;
 
-		RefreshImmvByOid(address.objectId, false, pstate->p_sourcetext, qc);
+		RefreshImmvByOid(address.objectId, true, false, pstate->p_sourcetext, qc);
 
 		if (qc)
 			qc->commandTag = CMDTAG_SELECT;
@@ -299,6 +299,13 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		CreateChangePreventTrigger(address.objectId);
 
 		table_close(matviewRel, NoLock);
+
+		if (IsolationUsesXactSnapshot())
+			ereport(WARNING,
+					(errmsg("inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ"),
+					 errdetail("The view may not include effects of a concurrent transaction."),
+					 errhint("create_immv should be used in isolation level READ COMMITTED, "
+							 "or execute refresh_immv to make sure the view is consistent.")));
 	}
 
 	return address;

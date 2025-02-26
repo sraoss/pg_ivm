@@ -94,6 +94,8 @@ pgivim.create_immv(immv_name text, view_definition text) RETURNS bigint
 
 When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
 
+`create_immv` acquires an `AccessExclusiveLock` on the view. However, even if we are able to acquire the lock, a concurrent transaction may have already incrementally updated and committed the view before we can acquire it. In the `REPEATABLE READ` or `SERIALIZABLE` isolation levels, this could lead to an inconsistent state of the view. Unfortunately, this situation cannot be detected during the creation of the view. As a result, `create_immv` raises a warning in these isolation levels, suggesting that the command be used in `READ COMMITTED` or that `refresh_immv` be executed afterward to make the view's contents remain consistent.
+
 Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
 #### refresh_immv
@@ -106,6 +108,8 @@ pgivm.refresh_immv(immv_name text, with_data bool) RETURNS bigint
 `refresh_immv` completely replaces the contents of an IMMV as `REFRESH MATERIALIZED VIEW` command does for a materialized view. To execute this function you must be the owner of the IMMV (with PostgreSQL 16 or earlier) or have the `MAINTAIN` privilege on the IMMV (with PostgreSQL 17 or later).  The old contents are discarded.
 
 The with_data flag is corresponding to `WITH [NO] DATA` option of REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
+
+`refresh_immv` acquires `AccessExclusiveLock` on the view. However, even if we are able to acquire the lock, a concurrent transaction may have already incrementally updated and committed the view before we can acquire the lock.  In `REPEATABLE READ` or `SERIALIZABLE` isolation level, this could lead to an inconsistent state of the view. Therefore, an error is raised to prevent anomalies when this situation is detected.
 
 Note that if you use PostgreSQL 17 or later, while `refresh_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
@@ -259,7 +263,15 @@ When a base table is truncated, the IMMV is also truncated and the contents beco
 
 ### Concurrent Transactions
 
-Suppose an IMMV is defined on two base tables and each table was modified in different a concurrent transaction simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change which happened in this transaction. On the other hand, in order to update the IMMV correctly in the transaction which was committed later, we need to know the changes occurred in both transactions.  For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` mode to make sure that the IMMV is updated in the latter transaction after the former transaction is committed.  In `REPEATABLE READ` or `SERIALIZABLE` mode, an error is raised immediately if lock acquisition fails because any changes which occurred in other transactions are not visible in these modes and IMMV cannot be updated correctly in such situations. However, as an exception if the IMMV has only one base table and doesn't use DISTINCT or GROUP BY, and the table is modified by `INSERT`, then the lock held on the IMMV is `RowExclusiveLock`.
+Incremental updates of a view are basically performed in sequentially even with concurrent transactions running.
+
+Suppose an IMMV is defined on two base tables and each table is modified in different concurrent transactions simultaneously. In the transaction which was committed first, the IMMV can be updated considering only the change made in that transaction. However, to update the IMMV correctly in the transaction that commits later, we need to account for the changes made in both transactions.
+
+ For this reason, `ExclusiveLock` is held on an IMMV immediately after a base table is modified in `READ COMMITTED` isolation level. This ensures that the IMMV is updated in the latter transaction only after the former transaction has committed.  In `REPEATABLE READ` or `SERIALIZABLE` isolation level, an error is raised immediately if lock acquisition fails, as changes made by other transactions are not visible in these levels,  and the IMMV cannot be updated correctly in such situations.
+
+However, as an exception if the IMMV has only one base table, does not  use DISTINCT or GROUP BY, and is modified by `INSERT`, then the lock held on the IMMV is `RowExclusiveLock`.
+
+Even if we are able to acquire a lock, a concurrent transaction may have already incrementally updated and committed the view before we can acquire the lock.  In `REPEATABLE READ` or `SERIALIZABLE` isolation level, this could lead to an inconsistent state of the view. Therefore, an error is raised to prevent anomalies when this situation is detected.
 
 ### Row Level Security
 

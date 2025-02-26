@@ -63,8 +63,10 @@ PG_FUNCTION_INFO_V1(get_immv_def);
 static void
 IvmXactCallback(XactEvent event, void *arg)
 {
-	if (event == XACT_EVENT_ABORT)
-		AtAbort_IVM();
+	if (event == XACT_EVENT_PRE_COMMIT)
+		AtPreCommit_IVM();
+	else if (event == XACT_EVENT_ABORT)
+		AtAbort_IVM(InvalidSubTransactionId);
 }
 
 static void
@@ -72,7 +74,7 @@ IvmSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
 				   SubTransactionId parentSubid, void *arg)
 {
 	if (event == SUBXACT_EVENT_ABORT_SUB)
-		AtAbort_IVM();
+		AtAbort_IVM(mySubid);
 }
 
 
