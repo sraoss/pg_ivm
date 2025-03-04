@@ -191,6 +191,8 @@ create_immv(PG_FUNCTION_ARGS)
 	CreateTableAsStmt *ctas;
 	StringInfoData command_buf;
 
+	warnIfPgIvmNotPreloaded();
+
 	parseNameAndColumns(relname, &names, &colNames);
 
 	initStringInfo(&command_buf);
@@ -249,6 +251,8 @@ refresh_immv(PG_FUNCTION_ARGS)
 	char    *relname = text_to_cstring(t_relname);
 	QueryCompletion qc;
 	StringInfoData command_buf;
+
+	warnIfPgIvmNotPreloaded();
 
 	initStringInfo(&command_buf);
 	appendStringInfo(&command_buf, "SELECT refresh_immv('%s, %s);",
@@ -363,6 +367,8 @@ get_immv_def(PG_FUNCTION_ARGS)
 	Relation matviewRel = NULL;
 	Query *query = NULL;
 	char *querystring = NULL;
+
+	warnIfPgIvmNotPreloaded();
 
 	/* Make sure IMMV is a table. */
 	if (get_rel_relkind(matviewOid) != RELKIND_RELATION)
