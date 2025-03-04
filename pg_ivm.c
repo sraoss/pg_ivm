@@ -273,19 +273,20 @@ IVM_prevent_immv_change(PG_FUNCTION_ARGS)
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
 	Relation	rel = trigdata->tg_relation;
 
-	if (ImmvIncrementalMaintenanceIsEnabled())
-		return PointerGetDatum(NULL);
-
 	/*
-	 * If we are maintaining an IMMV, this warning would have been emitted by
-	 * the IVM_immediate_* triggers, so there is no need to emit it again.
+	 * This warning is shown regardless of whether the user is manually
+	 * modifying the materialized view, or the extension is performing
+	 * incremental maintenance.
 	 */
 	warnIfPgIvmNotPreloaded();
 
-	ereport(ERROR,
-			(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-			 errmsg("cannot change materialized view \"%s\"",
-					RelationGetRelationName(rel))));
+	if (!ImmvIncrementalMaintenanceIsEnabled())
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("cannot change materialized view \"%s\"",
+						RelationGetRelationName(rel))));
+
+	return PointerGetDatum(NULL);
 }
 
 /*
