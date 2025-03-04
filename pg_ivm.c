@@ -269,13 +269,19 @@ IVM_prevent_immv_change(PG_FUNCTION_ARGS)
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
 	Relation	rel = trigdata->tg_relation;
 
-	if (!ImmvIncrementalMaintenanceIsEnabled())
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("cannot change materialized view \"%s\"",
-						RelationGetRelationName(rel))));
+	if (ImmvIncrementalMaintenanceIsEnabled())
+		return PointerGetDatum(NULL);
 
-	return PointerGetDatum(NULL);
+	/*
+	 * If we are maintaining an IMMV, this warning would have been emitted by
+	 * the IVM_immediate_* triggers, so there is no need to emit it again.
+	 */
+	warnIfPgIvmNotPreloaded();
+
+	ereport(ERROR,
+			(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+			 errmsg("cannot change materialized view \"%s\"",
+					RelationGetRelationName(rel))));
 }
 
 /*
@@ -467,7 +473,7 @@ PgIvmFuncName(char *name)
  *
  * Check if pg_ivm is in the shared_preload_libraries parameter.
  */
-bool
+static bool
 pgIvmIsInSharedPreloadLibraries()
 {
 	return check_string_in_guc_list("pg_ivm", shared_preload_libraries_string,
@@ -479,11 +485,31 @@ pgIvmIsInSharedPreloadLibraries()
  *
  * Check if pg_ivm is in the session_preload_libraries parameter.
  */
-bool
+static bool
 pgIvmIsInSessionPreloadLibraries()
 {
 	return check_string_in_guc_list("pg_ivm", session_preload_libraries_string,
 									"session_preload_libraries");
+}
+
+/*
+ * warnIfPgIvmNotPreloaded
+ *
+ * Emit a warning if pg_ivm is not in shared_preload_libraries or
+ * session_preload_libraries.
+ */
+void
+warnIfPgIvmNotPreloaded()
+{
+	if (!pgIvmIsInSharedPreloadLibraries() &&
+		!pgIvmIsInSessionPreloadLibraries())
+		ereport(WARNING,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("pg_ivm is not loaded in shared_preload_libraries or "
+						"session_preload_libraries"),
+				 errhint("Add pg_ivm to session_preload_libraries and restart "
+						 "the session. Or, add pg_ivm to "
+						 "shared_preload_libraries and restart Postgres.")));
 }
 
 /*
