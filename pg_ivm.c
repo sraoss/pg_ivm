@@ -21,6 +21,7 @@
 #include "catalog/pg_namespace_d.h"
 #include "catalog/pg_trigger_d.h"
 #include "commands/trigger.h"
+#include "miscadmin.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
 #include "parser/scansup.h"
@@ -50,6 +51,8 @@ static void parseNameAndColumns(const char *string, List **names, List **colName
 
 static void PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 								  Oid objectId, int subId, void *arg);
+static bool check_string_in_guc_list(const char *str, const char *guc_var,
+									 const char *guc_name);
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(create_immv);
@@ -457,4 +460,64 @@ List *
 PgIvmFuncName(char *name)
 {
     return list_make2(makeString("pgivm"), makeString(name));
+}
+
+/*
+ * pgIvmIsInSharedPreloadLibraries
+ *
+ * Check if pg_ivm is in the shared_preload_libraries parameter.
+ */
+bool
+pgIvmIsInSharedPreloadLibraries()
+{
+	return check_string_in_guc_list("pg_ivm", shared_preload_libraries_string,
+									"shared_preload_libraries");
+}
+
+/*
+ * pgIvmIsInSessionPreloadLibraries
+ *
+ * Check if pg_ivm is in the session_preload_libraries parameter.
+ */
+bool
+pgIvmIsInSessionPreloadLibraries()
+{
+	return check_string_in_guc_list("pg_ivm", session_preload_libraries_string,
+									"session_preload_libraries");
+}
+
+/*
+ * check_string_in_guc_list
+ *
+ * Check if a string is contained in a GUC parameter consisting of a
+ * comma-separated list of fields.
+ */
+static bool
+check_string_in_guc_list(const char *str, const char *guc_var,
+						 const char *guc_name)
+{
+	bool		match = false;
+	char	   *guc_copy;
+	List	   *guc_list = NIL;
+	ListCell   *lc;
+
+	guc_copy = pstrdup(guc_var);
+	if (!SplitGUCList(guc_copy, ',', &guc_list))
+		elog(ERROR, "could not parse %s", guc_name);
+
+	foreach(lc, guc_list)
+	{
+		char	   *guc_str = (char *) lfirst(lc);
+
+		if (strcmp(guc_str, str) == 0)
+		{
+			match = true;
+			break;
+		}
+	}
+
+	pfree(guc_copy);
+	list_free(guc_list);
+
+	return match;
 }
