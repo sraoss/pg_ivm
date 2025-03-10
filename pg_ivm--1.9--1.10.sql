@@ -12,5 +12,7 @@ ALTER FUNCTION "IVM_prevent_immv_change"() SET SCHEMA pgivm;
 
 GRANT USAGE ON SCHEMA pgivm TO PUBLIC;
 
+ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN lastivmupdate xid8;
+
 -- drop a garbage
 DROP SCHEMA __pg_ivm__;

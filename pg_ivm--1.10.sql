@@ -6,6 +6,7 @@ CREATE TABLE pgivm.pg_ivm_immv(
   immvrelid regclass NOT NULL,
   viewdef text NOT NULL,
   ispopulated bool NOT NULL,
+  lastivmupdate xid8,
 
   CONSTRAINT pg_ivm_immv_pkey PRIMARY KEY (immvrelid)
 );

@@ -20,6 +20,11 @@ DATA = pg_ivm--1.0.sql \
 
 REGRESS = pg_ivm create_immv refresh_immv
 
+ISOLATION = create_insert  refresh_insert  insert_insert \
+            create_insert2 refresh_insert2 insert_insert2 \
+            create_insert3 refresh_insert3 insert_insert3
+ISOLATION_OPTS = --load-extension=pg_ivm
+
 PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)

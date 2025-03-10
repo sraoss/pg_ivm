@@ -1,0 +1,211 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 refresh s2 insert c1 check2 c2 mv
+step s1: SELECT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+refresh_immv
+------------
+           1
+(1 row)
+
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 refresh s2 c1 insert check2 c2 mv
+step s1: SELECT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+refresh_immv
+------------
+           1
+(1 row)
+
+step s2: SELECT;
+step c1: COMMIT;
+step insert: INSERT INTO a VALUES (2);
+step check2: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 refresh insert c1 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+refresh_immv
+------------
+           1
+(1 row)
+
+step insert: INSERT INTO a VALUES (2);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 insert refresh c2 check1 c1 mv
+step s1: SELECT;
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step refresh: SELECT pgivm.refresh_immv('mv', true); <waiting ...>
+step c2: COMMIT;
+step refresh: <... completed>
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 refresh c1 insert check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+refresh_immv
+------------
+           1
+(1 row)
+
+step c1: COMMIT;
+step insert: INSERT INTO a VALUES (2);
+step check2: SELECT check_mv();
+check_mv
+--------
+ok      
+(1 row)
+
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 insert s1 refresh c2 check1 c1 mv
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step s1: SELECT;
+step refresh: SELECT pgivm.refresh_immv('mv', true); <waiting ...>
+step c2: COMMIT;
+step refresh: <... completed>
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 insert s1 c2 refresh check1 c1 mv
+step s2: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step s1: SELECT;
+step c2: COMMIT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 s1 insert c2 refresh check1 c1 mv
+step s2: SELECT;
+step s1: SELECT;
+step insert: INSERT INTO a VALUES (2);
+step c2: COMMIT;
+step refresh: SELECT pgivm.refresh_immv('mv', true);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
+x|y
+-+-
+1|1
+2|2
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+

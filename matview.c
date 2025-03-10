@@ -50,6 +50,7 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/typcache.h"
+#include "utils/xid8.h"
 
 #include "pg_ivm.h"
 
@@ -107,6 +108,15 @@ typedef struct MV_TriggerHashEntry
 	List   *tables;		/* List of MV_TriggerTable */
 	bool	has_old;	/* tuples are deleted from any table? */
 	bool	has_new;	/* tuples are inserted into any table? */
+
+	/*
+	 * List of sub-transaction IDs that incrementally updated the view.
+	 * This list is maintained through a transaction, and an ID is removed
+	 * when a sub-transaction is aborted. If any ID is left when the
+	 * transaction is committed, this means the view is incrementally
+	 * updated in this transaction.
+	 */
+	List   *subxids;
 } MV_TriggerHashEntry;
 
 /*
@@ -218,7 +228,11 @@ static void mv_InitHashTables(void);
 static SPIPlanPtr mv_FetchPreparedPlan(MV_QueryKey *key);
 static void mv_HashPreparedPlan(MV_QueryKey *key, SPIPlanPtr plan);
 static void mv_BuildQueryKey(MV_QueryKey *key, Oid matview_id, int32 query_type);
-static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort);
+static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
+						SubTransactionId subxid);
+static void setLastUpdateXid(Oid immv_oid, FullTransactionId xid);
+static FullTransactionId getLastUpdateXid(Oid immv_oid);
+
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
@@ -257,16 +271,18 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 										  NULL);
 #endif
 
-	return RefreshImmvByOid(matviewOid, skipData, queryString, qc);
+	return RefreshImmvByOid(matviewOid, false, skipData, queryString, qc);
 }
 
 /*
  * RefreshMatViewByOid -- refresh IMMV view by OID
  *
+ * This is also used to populate the IMMV created by create_immv command.
+ *
  * This imitates PostgreSQL's RefreshMatViewByOid().
  */
 ObjectAddress
-RefreshImmvByOid(Oid matviewOid, bool skipData,
+RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 				 const char *queryString, QueryCompletion *qc)
 {
 	Relation	matviewRel;
@@ -447,6 +463,19 @@ RefreshImmvByOid(Oid matviewOid, bool skipData,
 	}
 
 	/*
+	 * Create triggers on incremental maintainable materialized view
+	 * This argument should use 'dataQuery'. This needs to use a rewritten query,
+	 * because a sublink in jointree is not supported by this function.
+	 *
+	 * This is performed before generating data because we have to wait
+	 * concurrent transactions modifying a base table and then take a snapshot
+	 * to see changes by these transactions to make sure a consistent view
+	 * is created.
+	 */
+	if (!skipData && !oldPopulated)
+		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid);
+
+	/*
 	 * Create the transient table that will receive the regenerated data. Lock
 	 * it against access by any other process until commit (by which time it
 	 * will be gone).
@@ -461,9 +490,40 @@ RefreshImmvByOid(Oid matviewOid, bool skipData,
 	LockRelationOid(OIDNewHeap, AccessExclusiveLock);
 	dest = CreateTransientRelDestReceiver(OIDNewHeap);
 
+	/*
+	 * In READ COMMITTED, get and push the latest snapshot again to see the
+	 * results of concurrent transactions committed after the current
+	 * transaction started.
+	 */
+	if (!IsolationUsesXactSnapshot())
+		PushActiveSnapshot(GetTransactionSnapshot());
+
+	/*
+	 * If a concurrent transaction updated the view incrementally and was
+	 * committed before we acquired the lock, the results of refresh_immv could
+	 * be inconsistent. Therefore, we have to check the transaction ID of the
+	 * most recent update of the view, and if this was in progress at the
+	 * transaction start, raise an error to prevent anomalies.
+	 */
+	if (!is_create)
+	{
+		FullTransactionId xid;
+
+		xid = getLastUpdateXid(matviewOid);
+		if (XidInMVCCSnapshot(XidFromFullTransactionId(xid), GetActiveSnapshot()))
+			ereport(ERROR,
+					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					 errmsg("the materialized view is incrementally updated in concurrent transaction"),
+					 errhint("The transaction might succeed if retried.")));
+	}
+
 	/* Generate the data, if wanted. */
 	if (!skipData)
 		processed = refresh_immv_datafill(dest, dataQuery, NULL, NULL, queryString);
+
+	/* Pop the original snapshot. */
+	if (!IsolationUsesXactSnapshot())
+		PopActiveSnapshot();
 
 	/* Make the matview match the newly generated data. */
 	refresh_by_heap_swap(matviewOid, OIDNewHeap, relpersistence);
@@ -477,14 +537,6 @@ RefreshImmvByOid(Oid matviewOid, bool skipData,
 	pgstat_count_truncate(matviewRel);
 	if (!skipData)
 		pgstat_count_heap_insert(matviewRel, processed);
-
-	/*
-	 * Create triggers on incremental maintainable materialized view
-	 * This argument should use 'dataQuery'. This needs to use a rewritten query,
-	 * because a sublink in jointree is not supported by this function.
-	 */
-	if (!skipData && !oldPopulated)
-		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid);
 
 	table_close(matviewRel, NoLock);
 
@@ -707,6 +759,8 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 	/* If the view has more than one tables, we have to use an exclusive lock. */
 	if (ex_lock)
 	{
+		FullTransactionId xid;
+
 		/*
 		 * Wait for concurrent transactions which update this materialized view at
 		 * READ COMMITED. This is needed to see changes committed in other
@@ -731,6 +785,21 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 					errmsg("could not obtain lock on materialized view \"%s\" during incremental maintenance",
 							relname)));
 		}
+
+		/*
+		 * Even if we can acquire an lock, a concurrent transaction could have
+		 * updated the view incrementally and been committed before we acquired
+		 * the lock. Therefore, we have to check the transaction ID of the most
+		 * recent update of the view, and if this was in progress at the
+		 * transaction start, raise an error to prevent anomalies.
+		 */
+		xid = getLastUpdateXid(matviewOid);
+		if (XidInMVCCSnapshot(XidFromFullTransactionId(xid), GetTransactionSnapshot()))
+			ereport(ERROR,
+					(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					 errmsg("the materialized view is incrementally updated in concurrent transaction"),
+					 errhint("The transaction might succeed if retried.")));
+
 	}
 	else
 		LockRelationOid(matviewOid, RowExclusiveLock);
@@ -746,13 +815,22 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 											  HASH_ENTER, &found);
 
 	/* On the first BEFORE to update the view, initialize trigger data */
-	if (!found)
+	if (!found || entry->snapshot == InvalidSnapshot)
 	{
+		Snapshot snapshot;
+
 		/*
 		 * Get a snapshot just before the table was modified for checking
 		 * tuple visibility in the pre-update state of the table.
+		 *
+		 * In READ COMMITTED, use the latest snapshot again to see the
+		 * results of concurrent transactions committed after the current
+		 * transaction started.
 		 */
-		Snapshot snapshot = GetActiveSnapshot();
+		if (IsolationUsesXactSnapshot())
+			snapshot = GetActiveSnapshot();
+		else
+			snapshot = GetTransactionSnapshot();
 
 		entry->matview_id = matviewOid;
 		entry->before_trig_count = 0;
@@ -761,10 +839,16 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 		entry->tables = NIL;
 		entry->has_old = false;
 		entry->has_new = false;
+
+		/*
+		 * If this is the first table modifying query in the transaction,
+		 * initialize the list of subxids.
+		 */
+		if (!found)
+			entry->subxids = NIL;
 	}
 
 	entry->before_trig_count++;
-
 
 	return PointerGetDatum(NULL);
 }
@@ -788,6 +872,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	char	   *matviewOid_text = trigdata->tg_trigger->tgargs[0];
 	Relation	matviewRel;
 	int old_depth = immv_maintenance_depth;
+	SubTransactionId subxid;
 
 	Oid			relowner;
 	Tuplestorestate *old_tuplestore = NULL;
@@ -885,8 +970,17 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	 * If this is the last AFTER trigger call, continue and update the view.
 	 */
 
+	/* record the subxid that updated the view incrementally */
+	subxid = GetCurrentSubTransactionId();
+	if (!list_member_xid(entry->subxids, subxid))
+	{
+		oldcxt = MemoryContextSwitchTo(TopTransactionContext);
+		entry->subxids = lappend_xid(entry->subxids, subxid);
+		MemoryContextSwitchTo(oldcxt);
+	}
+
 	/*
-	 * Advance command counter to make the updated base table row locally
+	 * Advance command counter to make the updated base table rows locally
 	 * visible.
 	 */
 	CommandCounterIncrement();
@@ -897,10 +991,12 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	Assert(matviewRel->rd_rel->relkind == RELKIND_RELATION);
 
 	/*
-	 * Get and push the latast snapshot to see any changes which is committed
-	 * during waiting in other transactions at READ COMMITTED level.
+	 * In READ COMMITTED, get and push the latest snapshot again to see the
+	 * results of concurrent transactions committed after the current
+	 * transaction started.
 	 */
-	PushActiveSnapshot(GetTransactionSnapshot());
+	if (!IsolationUsesXactSnapshot())
+		PushActiveSnapshot(GetTransactionSnapshot());
 
 	/*
 	 * Check for active uses of the relation in the current transaction, such
@@ -985,10 +1081,11 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		}
 
 		/* Clean up hash entry and delete tuplestores */
-		clean_up_IVM_hash_entry(entry, false);
+		clean_up_IVM_hash_entry(entry, false, InvalidSubTransactionId);
 
 		/* Pop the original snapshot. */
-		PopActiveSnapshot();
+		if (!IsolationUsesXactSnapshot())
+			PopActiveSnapshot();
 
 		table_close(matviewRel, NoLock);
 
@@ -1148,7 +1245,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	}
 
 	/* Clean up hash entry and delete tuplestores */
-	clean_up_IVM_hash_entry(entry, false);
+	clean_up_IVM_hash_entry(entry, false, InvalidSubTransactionId);
 	if (old_tuplestore)
 	{
 		dest_old->rDestroy(dest_old);
@@ -1161,7 +1258,8 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	}
 
 	/* Pop the original snapshot. */
-	PopActiveSnapshot();
+	if (!IsolationUsesXactSnapshot())
+		PopActiveSnapshot();
 
 	table_close(matviewRel, NoLock);
 
@@ -1839,7 +1937,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	in_delta_calculation = true;
 
 	/* Generate old delta */
-	if (list_length(table->old_rtes) > 0)
+	if (dest_old && list_length(table->old_rtes) > 0)
 	{
 		/* Replace the modified table with the old delta table and calculate the old view delta. */
 		lfirst(lc) = union_ENRs(rte, table, table->old_rtes, "old", queryEnv);
@@ -1847,7 +1945,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	}
 
 	/* Generate new delta */
-	if (list_length(table->new_rtes) > 0)
+	if (dest_new && list_length(table->new_rtes) > 0)
 	{
 		/* Replace the modified table with the new delta table and calculate the new view delta*/
 		lfirst(lc) = union_ENRs(rte, table, table->new_rtes, "new", queryEnv);
@@ -2652,6 +2750,7 @@ apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 					matviewname, target_list->data,
 					target_list->data, deltaname_new_for_insert.data,
 					match_cond);
+
 	if (SPI_exec(querybuf.data, 0) != SPI_OK_INSERT)
 		elog(ERROR, "SPI_exec failed: %s", querybuf.data);
 }
@@ -3218,10 +3317,11 @@ mv_BuildQueryKey(MV_QueryKey *key, Oid matview_id, int32 query_type)
  * AtAbort_IVM
  *
  * Clean up hash entries for all materialized views. This is called at
- * transaction abort.
+ * (sub-)transaction abort. When the top-level transaction is aborted,
+ * InvalidSubTransactionId is set to subxid.
  */
 void
-AtAbort_IVM()
+AtAbort_IVM(SubTransactionId subxid)
 {
 	HASH_SEQ_STATUS seq;
 	MV_TriggerHashEntry *entry;
@@ -3230,7 +3330,38 @@ AtAbort_IVM()
 	{
 		hash_seq_init(&seq, mv_trigger_info);
 		while ((entry = hash_seq_search(&seq)) != NULL)
-			clean_up_IVM_hash_entry(entry, true);
+			clean_up_IVM_hash_entry(entry, true, subxid);
+	}
+
+	in_delta_calculation = false;
+}
+
+/*
+ * AtPreCommit_IVM
+ *
+ * Store the transaction ID that updated the view incrementally
+ * into the pg_ivm_immv catalog at transaction commit.
+ */
+void
+AtPreCommit_IVM()
+{
+	HASH_SEQ_STATUS seq;
+	MV_TriggerHashEntry *entry;
+
+	if (mv_trigger_info)
+	{
+		/*
+		 * For each view that was incrementally updated in the transaction,
+		 * record the transaction ID into the pg_ivm_immv catalog, and perform
+		 * the final clean up of the entry.
+		 */
+		hash_seq_init(&seq, mv_trigger_info);
+		while ((entry = hash_seq_search(&seq)) != NULL)
+		{
+			bool found;
+			setLastUpdateXid(entry->matview_id, GetTopFullTransactionId());
+			hash_search(mv_trigger_info, (void *) &entry->matview_id, HASH_REMOVE, &found);
+		}
 	}
 
 	in_delta_calculation = false;
@@ -3240,14 +3371,18 @@ AtAbort_IVM()
  * clean_up_IVM_hash_entry
  *
  * Clean up tuple stores and hash entries for a materialized view after its
- * maintenance finished.
+ * maintenance finished. This is called at the end of table modifying query
+ * or (sub-)transaction abort. When the top-level transaction is aborted,
+ * InvalidSubTransactionId is set to subxid.
  */
 static void
-clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort)
+clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
+						SubTransactionId subxid)
 {
 	bool found;
 	ListCell *lc;
 
+	/* clean up tuple stores */
 	foreach(lc, entry->tables)
 	{
 		MV_TriggerTable *table = (MV_TriggerTable *) lfirst(lc);
@@ -3273,12 +3408,136 @@ clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort)
 		}
 	}
 	list_free(entry->tables);
+	entry->tables = NIL;
 
-	if (!is_abort)
+	if (is_abort)
+	{
+		bool	remove_entry = false;
+
+		/*
+		 * When the top-level transaction is aborted, remove all subxids.
+		 * When a sub-transaction is aborted, remove only its subxid.
+		 */
+		if (subxid == InvalidSubTransactionId)
+			remove_entry = true;
+		else
+		{
+			foreach(lc, entry->subxids)
+			{
+				if (lfirst_xid(lc) == subxid)
+				{
+					entry->subxids = list_delete_cell(entry->subxids, lc);
+					break;
+				}
+			}
+
+			/*
+			 * If all the subxid are removed, it means that the view was not
+			 * updated at all in this transaction.
+			 */
+			if (list_length(entry->subxids) == 0)
+				remove_entry = true;
+		}
+
+
+		/*
+		 * Remove entries of not updated views from the hash table.
+		 */
+		if (remove_entry)
+			hash_search(mv_trigger_info, (void *) &entry->matview_id, HASH_REMOVE, &found);
+	}
+	else
+	{
+		/* When the query sucsessully finished, unregister the snapshot */
 		UnregisterSnapshot(entry->snapshot);
+	}
 
+	entry->snapshot = InvalidSnapshot;
+}
 
-	hash_search(mv_trigger_info, (void *) &entry->matview_id, HASH_REMOVE, &found);
+/*
+ * setLastUpdateXid
+ *
+ * Store the transaction ID that updated the view incremenally into the
+ * pg_ivm_immv catalog.
+ */
+static void
+setLastUpdateXid(Oid immv_oid, FullTransactionId xid)
+{
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), ShareRowExclusiveLock);
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+	Datum values[Natts_pg_ivm_immv];
+	bool nulls[Natts_pg_ivm_immv];
+	bool replaces[Natts_pg_ivm_immv];
+	HeapTuple newtup = NULL;
+
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(immv_oid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+	tup = systable_getnext(scan);
+
+	memset(values, 0, sizeof(values));
+	values[Anum_pg_ivm_immv_lastivmupdate -1 ] = FullTransactionIdGetDatum(xid);
+	MemSet(nulls, false, sizeof(nulls));
+	MemSet(replaces, false, sizeof(replaces));
+	replaces[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
+
+	newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
+
+	CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+	heap_freetuple(newtup);
+
+	/*
+	 * Advance command counter to make the updated pg_ivm_immv row locally
+	 * visible.
+	 */
+	CommandCounterIncrement();
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, ShareRowExclusiveLock);
+}
+
+/*
+ * getLastUpdateXid
+ *
+ * Get the most recent transaction ID that updated the view incrementally
+ * from the pg_ivm_immv catalog.
+ */
+static FullTransactionId
+getLastUpdateXid(Oid immv_oid)
+{
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+	bool isnull;
+	Datum datum;
+	FullTransactionId xid = InvalidFullTransactionId;
+
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(immv_oid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+
+	tup = systable_getnext(scan);
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_lastivmupdate, tupdesc, &isnull);
+
+	if (!isnull)
+		xid = DatumGetFullTransactionId(datum);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+
+	return xid;
 }
 
 /*

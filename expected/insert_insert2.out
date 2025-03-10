@@ -1,0 +1,373 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 update1 s2 update2 c1 check2 c2 mv
+step s1: SELECT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+step s2: SELECT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+11|11|100
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 update1 s2 c1 update2 check2 c2 mv
+step s1: SELECT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+step s2: SELECT;
+step c1: COMMIT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+11|11|100
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 update1 update2 c1 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+11|11|100
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 update2 update1 c2 check1 c1 mv
+step s1: SELECT;
+step s2: SELECT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c2: COMMIT;
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|111
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 update1 c1 update2 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+step c1: COMMIT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+11|11|100
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 update2 s1 update1 c2 check1 c1 mv
+step s2: SELECT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+step s1: SELECT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c2: COMMIT;
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|111
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 update2 s1 c2 update1 check1 c1 mv
+step s2: SELECT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+step s1: SELECT;
+step c2: COMMIT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|111
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 s1 update2 c2 update1 check1 c1 mv
+step s2: SELECT;
+step s1: SELECT;
+step update2: UPDATE b SET j = 111 WHERE i = 1;
+step c2: COMMIT;
+step update1: UPDATE a SET j = 11 WHERE i = 1;
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|111
+(1 row)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 insert1 s2 insert2 c1 check2 c2 mv
+step s1: SELECT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+step s2: SELECT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+20|20|200
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 insert1 s2 c1 insert2 check2 c2 mv
+step s1: SELECT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+step s2: SELECT;
+step c1: COMMIT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+20|20|200
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 insert1 insert2 c1 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c1: COMMIT;
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+20|20|200
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 insert2 insert1 c2 check1 c1 mv
+step s1: SELECT;
+step s2: SELECT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c2: COMMIT;
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+10|11|100
+11|10|100
+11|11|100
+21|21|201
+(5 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s1 s2 insert1 c1 insert2 check2 c2 mv
+step s1: SELECT;
+step s2: SELECT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+step c1: COMMIT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check2: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c2: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+20|20|200
+(2 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 insert2 s1 insert1 c2 check1 c1 mv
+step s2: SELECT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+step s1: SELECT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step c2: COMMIT;
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+10|11|100
+11|10|100
+11|11|100
+21|21|201
+(5 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 insert2 s1 c2 insert1 check1 c1 mv
+step s2: SELECT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+step s1: SELECT;
+step c2: COMMIT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+10|11|100
+11|10|100
+11|11|100
+21|21|201
+(5 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
+
+starting permutation: s2 s1 insert2 c2 insert1 check1 c1 mv
+step s2: SELECT;
+step s1: SELECT;
+step insert2: INSERT INTO a VALUES (1,11), (2,21); INSERT INTO b VALUES (2,201);
+step c2: COMMIT;
+step insert1: INSERT INTO a VALUES (2,20); INSERT INTO b VALUES (2,200);
+ERROR:  the materialized view is incrementally updated in concurrent transaction
+step check1: SELECT check_mv();
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step c1: COMMIT;
+step mv: SELECT * FROM mv ORDER BY 1,2,3; SELECT check_mv();
+ x| y|  z
+--+--+---
+10|10|100
+10|11|100
+11|10|100
+11|11|100
+21|21|201
+(5 rows)
+
+check_mv
+--------
+ok      
+(1 row)
+
