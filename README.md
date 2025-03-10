@@ -68,11 +68,24 @@ If you installed PostgreSQL from rpm or deb, you will need the devel package (fo
 
 > **Important:** Don't forget to set the `PG_CONFIG` variable (`make PG_CONFIG=...`) or the `PATH` to the `pg_config` command in case you want to use `pg_ivm` on a non-default or custom build of PostgreSQL. Read more [here](https://wiki.postgresql.org/wiki/Building_and_Installing_PostgreSQL_Extension_Modules).
 
-And, execute CREATE EXTENSION comand.
+Once installed, execute `CREATE EXTENSION` comand.
 
 ```sql
 CREATE EXTENSION pg_ivm;
 ```
+
+### Configuration
+
+To ensure `pg_ivm` maintains IMMVs correctly, add it to either shared_preload_libraries or session_preload_libraries in postgresql.conf:
+
+```
+# Add pg_ivm to preload libraries
+shared_preload_libraries = 'pg_ivm'
+# OR
+session_preload_libraries = 'pg_ivm'
+```
+
+After making this change, restart PostgreSQL for the configuration to take effect.
 
 ### RPM packages and yum repository
 
@@ -133,6 +146,8 @@ The catalog `pgivm.pg_ivm_immv` stores IMMV information.
 
 ## Example
 
+### `CREATE MATERIALIZED VIEW` and `REFRESH MATERIALIZED VIEW`
+
 In general, IMMVs allow faster updates than `REFRESH MATERIALIZED VIEW` at the price of slower updates to their base tables. Update of base tables is slower because triggers will be invoked and the IMMV is updated in triggers per modification statement.
 
 For example, suppose a normal materialized view defined as below:
@@ -156,6 +171,8 @@ REFRESH MATERIALIZED VIEW
 Time: 20575.721 ms (00:20.576)
 ```
 
+### Creating an IMMV
+
 On the other hand, after creating IMMV with the same view definition as below:
 
 ```
@@ -169,7 +186,7 @@ NOTICE:  created index "immv_index" on immv "immv"
 (1 row)
 ```
 
-updating a tuple in a base table takes more than the normal view, but its content is updated automatically and this is faster than the `REFRESH MATERIALIZED VIEW` command.
+Updating a tuple in a base table takes more than the normal view, but its content is updated automatically and this is faster than the `REFRESH MATERIALIZED VIEW` command.
 
 ```sql
 test=# UPDATE pgbench_accounts SET abalance = 1234 WHERE aid = 1;
@@ -197,6 +214,110 @@ test=# UPDATE pgbench_accounts SET abalance = 9876 WHERE aid = 1;
 UPDATE 1
 Time: 3224.741 ms (00:03.225)
 ```
+
+### IMMV with Aggregate Functions
+
+You can create an IMMV that includes aggregate functions.
+
+```sql
+test=# SELECT pgivm.create_immv('immv_agg',
+        'SELECT bid, count(*), sum(abalance), avg(abalance)
+         FROM pgbench_accounts JOIN pgbench_branches USING(bid) GROUP BY bid');
+NOTICE:  created index "immv_agg_index" on immv "immv_agg"
+ create_immv 
+-------------
+         100
+(1 row)
+
+Time: 5772.625 ms (00:05.773)
+```
+
+Creating this view takes about five seconds, and the normal refresh operation requires a similar amount of time. The following example demonstrates refreshing the IMMV using `refresh_immv`. The execution time would be approximately the same if you used `REFRESH MATERIALIZED VIEW` on a regular materialized view with the same definition.
+
+```sql
+test=# SELECT pgivm.refresh_immv('immv_agg',true);
+ refresh_immv
+--------------
+          100
+(1 row)
+
+Time: 5766.292 ms (00:05.766)
+```
+
+When a base table is updated, the IMMV is also automatically updated incrementally, as expected.
+
+```sql
+test=# SELECT bid, count, sum, avg FROM immv_agg WHERE bid = 42;
+ bid | count  |  sum  |          avg
+-----+--------+-------+------------------------
+  42 | 100000 | 38774 | 0.38774000000000000000
+(1 row)
+
+Time: 3.123 ms
+
+test=# UPDATE pgbench_accounts SET abalance = abalance + 1000 WHERE aid = 4112345 AND bid = 42;
+UPDATE 1
+Time: 16.616 ms
+
+test=# SELECT bid, count, sum, avg FROM immv_agg WHERE bid = 42;
+ bid | count  |  sum  |          avg
+-----+--------+-------+------------------------
+  42 | 100000 | 39774 | 0.39774000000000000000
+(1 row)
+
+Time: 1.987 ms
+```
+
+After updating a row in the `pgbench_accounts` table, you can see that the aggregated values in `immv_agg` are updated automatically.
+
+### Listing IMMVs and Viewing Their Definitions
+
+You can find all IMMVs in the `pg_ivm_immv` catalog and view their definition queries by executing the `get_immv_def` function."
+
+```sql
+test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM pgivm.pg_ivm_immv;
+   immv   |                  immv_def
+----------+--------------------------------------------
+ immv_agg |  SELECT pgbench_accounts.bid,             +
+          |     count(*) AS count,                    +
+          |     sum(pgbench_accounts.abalance) AS sum,+
+          |     avg(pgbench_accounts.abalance) AS avg +
+          |    FROM (pgbench_accounts                 +
+          |      JOIN pgbench_branches USING (bid))   +
+          |   GROUP BY pgbench_accounts.bid
+ immv     |  SELECT a.aid,                            +
+          |     b.bid,                                +
+          |     a.abalance,                           +
+          |     b.bbalance                            +
+          |    FROM (pgbench_accounts a               +
+          |      JOIN pgbench_branches b USING (bid))
+(2 rows)
+```
+
+### Dropping an IMMV
+
+An IMMV can be dropped using the `DROP TABLE` command. Once an IMMV is dropped, its entry is automatically removed from the `pg_ivm_immv` catalog.
+
+```sql
+test=# DROP TABLE immv;
+DROP TABLE
+
+test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM pgivm.pg_ivm_immv;
+   immv   |                  immv_def
+----------+--------------------------------------------
+ immv_agg |  SELECT pgbench_accounts.bid,             +
+          |     count(*) AS count,                    +
+          |     sum(pgbench_accounts.abalance) AS sum,+
+          |     avg(pgbench_accounts.abalance) AS avg +
+          |    FROM (pgbench_accounts                 +
+          |      JOIN pgbench_branches USING (bid))   +
+          |   GROUP BY pgbench_accounts.bid
+(1 row)
+```
+
+## `pg_dump` and `pg_upgrade`
+
+After restoring data from a `pg_dump` backup or upgrading `PostgreSQL` using `pg_upgrade`, all IMMVs must be manually dropped and recreated.
 
 ## Supported View Definitions and Restriction
 
