@@ -80,7 +80,7 @@ RPM packages of pg_ivm are available from the [PostgreSQL yum repository](https:
 
 ## Objects
 
-When `pg_ivm` is installed, the following objects are created in the schema `pgivm`.
+When `pg_ivm` is installed, the 'pgivm' schema is created, along with the following objects within this schema.
 
 ### Functions
 
