@@ -10,7 +10,7 @@ setup
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 }
 
 teardown

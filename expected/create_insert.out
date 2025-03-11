@@ -10,7 +10,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------
@@ -51,7 +51,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------
@@ -92,7 +92,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------
@@ -131,7 +131,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
  <waiting ...>
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
@@ -174,7 +174,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------
@@ -212,7 +212,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
  <waiting ...>
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
@@ -257,7 +257,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------
@@ -297,7 +297,7 @@ step create:
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 
 create_immv
 -----------

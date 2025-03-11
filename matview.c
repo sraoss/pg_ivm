@@ -970,12 +970,19 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	 * If this is the last AFTER trigger call, continue and update the view.
 	 */
 
-	/* record the subxid that updated the view incrementally */
+	/*
+	 * record the subxid that updated the view incrementally
+	 *
+	 * Note:
+	 * PG16 or later has list_member_xid and lappend_xid. It would be better
+	 * to use them, but we use integer for supporting older PGs since there
+	 * is no problem or now.
+	 */
 	subxid = GetCurrentSubTransactionId();
-	if (!list_member_xid(entry->subxids, subxid))
+	if (!list_member_int(entry->subxids, subxid))
 	{
 		oldcxt = MemoryContextSwitchTo(TopTransactionContext);
-		entry->subxids = lappend_xid(entry->subxids, subxid);
+		entry->subxids = lappend_int(entry->subxids, subxid);
 		MemoryContextSwitchTo(oldcxt);
 	}
 
@@ -3424,7 +3431,11 @@ clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
 		{
 			foreach(lc, entry->subxids)
 			{
-				if (lfirst_xid(lc) == subxid)
+				/* Note:
+				 * PG16 or later has lfirst_xid, but we use lfirst_int for
+				 * supporting older PGs since there is no problem or now.
+				 */
+				if (lfirst_int(lc) == subxid)
 				{
 					entry->subxids = list_delete_cell(entry->subxids, lc);
 					break;

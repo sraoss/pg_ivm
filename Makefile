@@ -1,5 +1,7 @@
 # contrib/pg_ivm/Makefile
 
+PG_CONFIG ?= pg_config
+
 MODULE_big = pg_ivm
 OBJS = \
 	$(WIN32RES) \
@@ -20,11 +22,17 @@ DATA = pg_ivm--1.0.sql \
 
 REGRESS = pg_ivm create_immv refresh_immv
 
+PGVER = $(shell $(PG_CONFIG) --version | sed "s/^[^ ]* \([0-9]*\).*$$/\1/" 2>/dev/null)
+
+# We assume PG13 is the only version that is supported by pg_ivm but
+# missing pg_isolation_regress.
+
+ifneq ($(PGVER),13)
 ISOLATION = create_insert  refresh_insert  insert_insert \
             create_insert2 refresh_insert2 insert_insert2 \
             create_insert3 refresh_insert3 insert_insert3
 ISOLATION_OPTS = --load-extension=pg_ivm
+endif
 
-PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)

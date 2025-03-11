@@ -24,7 +24,7 @@ step create {
 	CREATE FUNCTION check_mv() RETURNS text AS
 		$$ SELECT CASE WHEN count(*) = 0 THEN 'ok' ELSE 'ng' END
 			FROM ((SELECT * FROM mv EXCEPT ALL SELECT * FROM v) UNION ALL
-				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) $$ LANGUAGE sql;
+				  (SELECT * FROM v EXCEPT ALL SELECT * FROM mv)) v $$ LANGUAGE sql;
 }
 step check1 {SELECT check_mv();}
 step c1 { COMMIT; }
@@ -34,7 +34,7 @@ session tx2
 setup	{ BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED; }
 step s2	{ SELECT; }
 step insert { INSERT INTO a VALUES (2); }
-step check2 {SELECT check_mv(); }
+step check2 { SELECT check_mv(); }
 step c2 { COMMIT; }
 
 permutation s1 create s2 insert c1 check2 c2 mv
