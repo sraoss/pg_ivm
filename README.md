@@ -142,6 +142,7 @@ The catalog `pgivm.pg_ivm_immv` stores IMMV information.
 |immvrelid|regclass|The OID of the IMMV|
 |viewdef|text|Query tree (in the form of a nodeToString() representation) for the view definition|
 |ispopulated|bool|True if IMMV is currently populated|
+|lastivmupdate|xid8|The transaction ID of the most recent incremental update to the view|
 
 
 ## Example
