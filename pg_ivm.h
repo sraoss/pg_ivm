@@ -34,6 +34,7 @@ extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
 extern bool isImmv(Oid immv_oid);
 extern List *PgIvmFuncName(char *name);
+extern void warnIfPgIvmNotPreloaded(void);
 
 /* createas.c */
 
