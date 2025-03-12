@@ -300,7 +300,7 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
 An IMMV can be dropped using the `DROP TABLE` command. Once an IMMV is dropped, its entry is automatically removed from the `pg_ivm_immv` catalog.
 
 ```sql
-test=# DROP TABLE immv;
+test=# DROP TABLE immv_agg;
 DROP TABLE
 
 test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM pgivm.pg_ivm_immv;
@@ -313,6 +313,27 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
           |    FROM (pgbench_accounts                 +
           |      JOIN pgbench_branches USING (bid))   +
           |   GROUP BY pgbench_accounts.bid
+(1 row)
+```
+
+### Renaming an IMMV
+
+An IMMV can be renamed using the `ALTER TABLE` command. Once an IMMV is renamed, its entry is automatically renamed in the `pg_ivm_immv` catalog.
+
+```sql
+test=# ALTER TABLE immv_agg RENAME TO immv_agg2;
+ALTER TABLE
+
+test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM pgivm.pg_ivm_immv;
+   immv    |                  immv_def
+-----------+--------------------------------------------
+ immv_agg2 |  SELECT pgbench_accounts.bid,             +
+           |     count(*) AS count,                    +
+           |     sum(pgbench_accounts.abalance) AS sum,+
+           |     avg(pgbench_accounts.abalance) AS avg +
+           |    FROM (pgbench_accounts                 +
+           |      JOIN pgbench_branches USING (bid))   +
+           |   GROUP BY pgbench_accounts.bid
 (1 row)
 ```
 
