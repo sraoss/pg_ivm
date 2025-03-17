@@ -21,7 +21,6 @@
 #include "catalog/pg_namespace_d.h"
 #include "catalog/pg_trigger_d.h"
 #include "commands/trigger.h"
-#include "miscadmin.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
 #include "parser/scansup.h"
