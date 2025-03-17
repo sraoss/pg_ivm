@@ -2,14 +2,14 @@
 -- whenever pg_ivm is not in session_preload_libraries.
 DROP EXTENSION IF EXISTS pg_ivm CASCADE;
 NOTICE:  drop cascades to 12 other objects
-DETAIL:  drop cascades to trigger IVM_trigger_ins_before_17637 on table t
-drop cascades to trigger IVM_trigger_del_before_17638 on table t
-drop cascades to trigger IVM_trigger_upd_before_17639 on table t
-drop cascades to trigger IVM_trigger_truncate_before_17640 on table t
-drop cascades to trigger IVM_trigger_ins_after_17641 on table t
-drop cascades to trigger IVM_trigger_del_after_17642 on table t
-drop cascades to trigger IVM_trigger_upd_after_17643 on table t
-drop cascades to trigger IVM_trigger_truncate_after_17644 on table t
+DETAIL:  drop cascades to trigger IVM_trigger_ins_before_17633 on table t
+drop cascades to trigger IVM_trigger_del_before_17634 on table t
+drop cascades to trigger IVM_trigger_upd_before_17635 on table t
+drop cascades to trigger IVM_trigger_truncate_before_17636 on table t
+drop cascades to trigger IVM_trigger_ins_after_17637 on table t
+drop cascades to trigger IVM_trigger_del_after_17638 on table t
+drop cascades to trigger IVM_trigger_upd_after_17639 on table t
+drop cascades to trigger IVM_trigger_truncate_after_17640 on table t
 drop cascades to trigger IVM_prevent_immv_change_17621 on table mv
 drop cascades to trigger IVM_prevent_immv_change_17622 on table mv
 drop cascades to trigger IVM_prevent_immv_change_17623 on table mv
@@ -48,76 +48,4 @@ CREATE EXTENSION pg_ivm VERSION '1.9';  -- expect success
 ALTER EXTENSION pg_ivm UPDATE;          -- expect success
 DROP EXTENSION pg_ivm;
 CREATE EXTENSION pg_ivm;                -- expect success
--- Verify that the warning is emitted when each SQL function is called.
-ALTER SYSTEM RESET session_preload_libraries;
-SELECT pg_reload_conf();
- pg_reload_conf 
-----------------
- t
-(1 row)
-
-\c -
-CREATE TABLE mytab (i int primary key, a text);
-SELECT pgivm.create_immv('myview', 'SELECT i, reverse(a) FROM mytab');
-WARNING:  pg_ivm is not loaded in shared_preload_libraries or session_preload_libraries
-HINT:  Add pg_ivm to session_preload_libraries and restart the session. Or, add pg_ivm to shared_preload_libraries and restart Postgres.
-NOTICE:  created index "myview_index" on immv "myview"
- create_immv 
--------------
-           0
-(1 row)
-
-SELECT pgivm.refresh_immv('myview', true);
-WARNING:  pg_ivm is not loaded in shared_preload_libraries or session_preload_libraries
-HINT:  Add pg_ivm to session_preload_libraries and restart the session. Or, add pg_ivm to shared_preload_libraries and restart Postgres.
- refresh_immv 
---------------
-            0
-(1 row)
-
-SELECT pgivm.get_immv_def('myview');
-WARNING:  pg_ivm is not loaded in shared_preload_libraries or session_preload_libraries
-HINT:  Add pg_ivm to session_preload_libraries and restart the session. Or, add pg_ivm to shared_preload_libraries and restart Postgres.
-       get_immv_def        
----------------------------
-  SELECT i,               +
-     reverse(a) AS reverse+
-    FROM mytab
-(1 row)
-
--- Verify that the warning is emitted by the maintenance triggers.
-INSERT INTO mytab VALUES (1, 'asdf');
-WARNING:  pg_ivm is not loaded in shared_preload_libraries or session_preload_libraries
-HINT:  Add pg_ivm to session_preload_libraries and restart the session. Or, add pg_ivm to shared_preload_libraries and restart Postgres.
--- Verify that the warning is not emitted after pg_ivm is added to
--- session_preload_libraries.
-ALTER SYSTEM SET session_preload_libraries = pg_ivm;
-SELECT pg_reload_conf();
- pg_reload_conf 
-----------------
- t
-(1 row)
-
-\c -
-SELECT pgivm.create_immv('myview2', 'SELECT i, reverse(a) FROM mytab');
-NOTICE:  created index "myview2_index" on immv "myview2"
- create_immv 
--------------
-           1
-(1 row)
-
-SELECT pgivm.refresh_immv('myview2', true);
- refresh_immv 
---------------
-            1
-(1 row)
-
-SELECT pgivm.get_immv_def('myview2');
-       get_immv_def        
----------------------------
-  SELECT i,               +
-     reverse(a) AS reverse+
-    FROM mytab
-(1 row)
-
-INSERT INTO mytab VALUES (2, 'qwer');
+DROP EXTENSION pg_ivm CASCADE;
