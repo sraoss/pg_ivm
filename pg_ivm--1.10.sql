@@ -1,5 +1,3 @@
-CREATE SCHEMA pgivm;
-
 -- catalog
 
 CREATE TABLE pgivm.pg_ivm_immv(
