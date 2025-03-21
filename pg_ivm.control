@@ -3,4 +3,4 @@ comment = 'incremental view maintenance on PostgreSQL'
 default_version = '1.10'
 module_pathname = '$libdir/pg_ivm'
 relocatable = false 
-schema = pg_catalog
+schema = pgivm
