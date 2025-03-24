@@ -1612,7 +1612,7 @@ make_subquery_targetlist_from_table(MV_TriggerTable *table)
 		if (attr->attisdropped)
 			appendStringInfo(&str, "null");
 		else
-			appendStringInfo(&str, "%s", NameStr(attr->attname));
+			appendStringInfo(&str, "%s", quote_identifier(NameStr(attr->attname)));
 	}
 
 	return str.data;

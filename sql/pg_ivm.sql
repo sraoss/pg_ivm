@@ -37,6 +37,14 @@ SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 ROLLBACK;
 SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
 
+-- test for renaming column name to camel style
+BEGIN;
+ALTER TABLE mv_base_a RENAME i TO "I";
+ALTER TABLE mv_base_a RENAME j TO "J";
+UPDATE mv_base_a SET "J" = 0 WHERE "I" = 1;
+SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
+ROLLBACK;
+
 -- TRUNCATE a base table in join views
 BEGIN;
 TRUNCATE mv_base_a;
