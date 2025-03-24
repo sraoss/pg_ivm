@@ -241,6 +241,9 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	bool		do_refresh = false;
 	ObjectAddress address;
 
+	/* For mdpt purposes, we always create unlogged IMMVs */
+	into->rel->relpersistence = RELPERSISTENCE_UNLOGGED;
+
 	/* Check if the relation exists or not */
 	if (CreateTableAsRelExists(stmt))
 		return InvalidObjectAddress;
