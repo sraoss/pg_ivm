@@ -444,7 +444,8 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 				tgform = (Form_pg_trigger) GETSTRUCT(tgtup);
 
 				/* If trigger is created by IMMV, delete it. */
-				if (strncmp(NameStr(tgform->tgname), "IVM_trigger_", 12) == 0)
+				if (strncmp(NameStr(tgform->tgname), "IVM_trigger_", 12) == 0 ||
+					strncmp(NameStr(tgform->tgname), "IVM_prevent_", 12) == 0)
 				{
 					obj.classId = foundDep->classid;
 					obj.objectId = foundDep->objid;
@@ -474,7 +475,10 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 	 * is created.
 	 */
 	if (!skipData && !oldPopulated)
+	{
 		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid);
+		CreateChangePreventTrigger(matviewOid);
+	}
 
 	/*
 	 * Create the transient table that will receive the regenerated data. Lock
