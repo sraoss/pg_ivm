@@ -177,17 +177,39 @@ create_immv(PG_FUNCTION_ARGS)
 	text	*t_sql = PG_GETARG_TEXT_PP(1);
 	char	*relname = text_to_cstring(t_relname);
 	char	*sql = text_to_cstring(t_sql);
+
+	Query	*query = NULL;
+	QueryCompletion qc;
+	ParseState	*pstate = NULL;
+
+	parse_immv_query(relname, sql, &query, &pstate);
+
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
+
+	PG_RETURN_INT64(qc.nprocessed);
+}
+
+/*
+ * parse_immv_query
+ *
+ * Parse an IMMV definition query and return the Query tree and ParseState using
+ * the supplied pointers.
+ */
+void
+parse_immv_query(const char *relname, const char *sql, Query **query_ret,
+				 ParseState **pstate_ret)
+{
 	List	*parsetree_list;
 	RawStmt	*parsetree;
-	Query	*query;
-	QueryCompletion qc;
 	List	*names = NIL;
 	List	*colNames = NIL;
 
-	ParseState *pstate = make_parsestate(NULL);
 	CreateTableAsStmt *ctas;
 	StringInfoData command_buf;
+	Query	*query;
+	ParseState	*pstate;
 
+	pstate = make_parsestate(NULL);
 	parseNameAndColumns(relname, &names, &colNames);
 
 	initStringInfo(&command_buf);
@@ -230,9 +252,8 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *)ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
-
-	PG_RETURN_INT64(qc.nprocessed);
+	*query_ret = query;
+	*pstate_ret = pstate;
 }
 
 /*

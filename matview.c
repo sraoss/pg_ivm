@@ -233,6 +233,7 @@ static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
 static void setLastUpdateXid(Oid immv_oid, FullTransactionId xid);
 static FullTransactionId getLastUpdateXid(Oid immv_oid);
 
+static Query *recreate_immv_query(Relation matviewRel);
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
@@ -388,7 +389,7 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);
 
-	viewQuery = get_immv_query(matviewRel);
+	viewQuery = recreate_immv_query(matviewRel);
 
 	/* For IMMV, we need to rewrite matview query */
 	if (!skipData)
@@ -706,6 +707,83 @@ get_immv_query(Relation matviewRel)
 	datum = heap_getattr(tup, Anum_pg_ivm_immv_viewdef, tupdesc, &isnull);
 	Assert(!isnull);
 	query = (Query *) stringToNode(TextDatumGetCString(datum));
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+
+	return query;
+}
+
+/*
+ * recreate_immv_query
+ *
+ * Parse the querystring for this IMMV.  Update the viewdef column in
+ * pg_ivm_immv and return the Query tree.
+ */
+static Query *
+recreate_immv_query(Relation matviewRel)
+{
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+	bool isnull;
+	Datum datum;
+	Query *query = NULL;
+	IntoClause *into;
+	ParseState *pstate = NULL;
+	CreateTableAsStmt *stmt;
+	const char *querystring;
+	const char *relname;
+	const char *querytree;
+
+	Datum values[Natts_pg_ivm_immv];
+	bool nulls[Natts_pg_ivm_immv];
+	bool replaces[Natts_pg_ivm_immv];
+	HeapTuple newtup = NULL;
+
+	ScanKeyInit(&key,
+			    Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(RelationGetRelid(matviewRel)));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+								  true, NULL, 1, &key);
+
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return NULL;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_querystring, tupdesc, &isnull);
+	Assert(!isnull);
+	querystring = TextDatumGetCString(datum);
+
+	relname = psprintf("%s.%s",
+					   get_namespace_name(get_rel_namespace(matviewRel->rd_id)),
+					   get_rel_name(matviewRel->rd_id));
+
+	parse_immv_query(relname, querystring, &query, &pstate);
+	stmt = castNode(CreateTableAsStmt, query->utilityStmt);
+	into = stmt->into;
+
+	query = castNode(Query, stmt->query);
+	query = rewriteQueryForIMMV(query, into->colNames);
+	querytree = nodeToString((Node *) query);
+
+	memset(values, 0, sizeof(values));
+	memset(nulls, 0, sizeof(nulls));
+	memset(replaces, 0, sizeof(replaces));
+	values[Anum_pg_ivm_immv_viewdef - 1] = CStringGetTextDatum(querytree);
+	replaces[Anum_pg_ivm_immv_viewdef - 1] = true;
+
+	newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
+	CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+	heap_freetuple(newtup);
 
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);

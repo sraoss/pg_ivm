@@ -35,6 +35,8 @@ extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
 extern bool isImmv(Oid immv_oid);
 extern List *PgIvmFuncName(char *name);
+extern void parse_immv_query(const char *relname, const char *sql,
+							 Query **query_ret, ParseState **pstate_ret);
 
 /* createas.c */
 
