@@ -41,6 +41,7 @@
 #include "rewrite/rewriteManip.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/regproc.h"
 #include "utils/rel.h"
@@ -1710,20 +1711,27 @@ static void
 StoreImmvQuery(Oid viewOid, Query *viewQuery)
 {
 	char   *querytree = nodeToString((Node *) viewQuery);
+	char   *querystring;
 	Datum values[Natts_pg_ivm_immv];
 	bool isNulls[Natts_pg_ivm_immv];
+	Relation matviewRel;
 	Relation pgIvmImmv;
 	TupleDesc tupleDescriptor;
 	HeapTuple heapTuple;
 	ObjectAddress	address;
 
+	RestrictSearchPath();
+	matviewRel = table_open(viewOid, AccessShareLock);
+	querystring = pg_ivm_get_viewdef_internal(viewQuery, matviewRel, true);
+	table_close(matviewRel, NoLock);
+
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
-	isNulls[Anum_pg_ivm_immv_querystring - 1] = true;
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
 	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
+	values[Anum_pg_ivm_immv_querystring - 1] = CStringGetTextDatum(querystring);
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
 
