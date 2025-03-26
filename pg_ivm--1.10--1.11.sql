@@ -1,5 +1,24 @@
 ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN querystring text NOT NULL;
 
+CREATE FUNCTION pgivm.recreate_all_immvs() RETURNS VOID LANGUAGE PLPGSQL AS
+$$
+BEGIN
+	PERFORM pgivm.refresh_immv(n.nspname || '.' || c.relname, false)
+		FROM pgivm.pg_ivm_immv as ivm
+		JOIN pg_catalog.pg_class as c
+		ON c.oid = ivm.immvrelid
+		JOIN pg_catalog.pg_namespace as n
+		ON c.relnamespace = n.oid;
+
+	PERFORM pgivm.refresh_immv(n.nspname || '.' || c.relname, true)
+		FROM pgivm.pg_ivm_immv as ivm
+		JOIN pg_catalog.pg_class as c
+		ON c.oid = ivm.immvrelid
+		JOIN pg_catalog.pg_namespace as n
+		ON c.relnamespace = n.oid;
+END
+$$;
+
 CREATE FUNCTION pgivm.refresh_query_strings()
 RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER AS
 $$
@@ -14,7 +33,9 @@ BEGIN
 	UPDATE pgivm.pg_ivm_immv SET querystring = pgivm.get_immv_def(immvrelid);
 
 	-- Reset search path to the original value.
-	EXECUTE format('SET search_path = %s', old_search_path);
+	IF old_search_path != '' AND old_search_path != '""' THEN
+		EXECUTE format('SET search_path = %s', old_search_path);
+	END IF;
 END
 $$;
 
