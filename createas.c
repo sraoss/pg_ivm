@@ -1719,6 +1719,7 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
+	isNulls[Anum_pg_ivm_immv_querystring - 1] = true;
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
 	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);

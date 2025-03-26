@@ -20,12 +20,13 @@
 #include "tcop/dest.h"
 #include "utils/queryenvironment.h"
 
-#define Natts_pg_ivm_immv 4
+#define Natts_pg_ivm_immv 5
 
 #define Anum_pg_ivm_immv_immvrelid 1
 #define Anum_pg_ivm_immv_viewdef 2
 #define Anum_pg_ivm_immv_ispopulated 3
 #define Anum_pg_ivm_immv_lastivmupdate 4
+#define Anum_pg_ivm_immv_querystring 5
 
 /* pg_ivm.c */
 
