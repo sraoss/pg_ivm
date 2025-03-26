@@ -458,3 +458,12 @@ PgIvmFuncName(char *name)
 {
     return list_make2(makeString("pgivm"), makeString(name));
 }
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+void
+RestrictSearchPath(void)
+{
+	set_config_option("search_path", "pg_catalog, pg_temp", PGC_USERSET,
+					  PGC_S_SESSION, GUC_ACTION_SAVE, true, 0, false);
+}
+#endif

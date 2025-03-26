@@ -65,8 +65,13 @@ extern bool isIvmName(const char *s);
 /* ruleutils.c */
 
 extern char *pg_ivm_get_viewdef(Relation immvrel, bool pretty);
+extern char *pg_ivm_get_viewdef_internal(Query *query, Relation immvrel, bool pretty);
 
 /* subselect.c */
 extern void inline_cte(PlannerInfo *root, CommonTableExpr *cte);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+extern void RestrictSearchPath(void);
+#endif
 
 #endif

@@ -1,7 +1,7 @@
-ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN querystring text;
+ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN querystring text NOT NULL;
 
 CREATE FUNCTION pgivm.refresh_query_strings()
-RETURNS event_trigger LANGUAGE plpgsql AS
+RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER AS
 $$
 DECLARE
 	old_search_path text;
