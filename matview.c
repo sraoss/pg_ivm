@@ -233,7 +233,7 @@ static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
 static void setLastUpdateXid(Oid immv_oid, FullTransactionId xid);
 static FullTransactionId getLastUpdateXid(Oid immv_oid);
 
-static Query *recreate_immv_query(Relation matviewRel);
+static Query *update_immv_viewdef(Relation matviewRel);
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
@@ -389,7 +389,18 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);
 
-	viewQuery = recreate_immv_query(matviewRel);
+	/*
+	 * Recreate the Query tree from the query string to account for changing
+	 * base table OIDs (e.g. after dump/restore) or changing format of the Query
+	 * node (after pg_upgrade).
+	 *
+	 * No need to create the Query tree a second time if we are creating a new
+	 * IMMV.
+	 */
+	if (is_create)
+		viewQuery = get_immv_query(matviewRel);
+	else
+		viewQuery = update_immv_viewdef(matviewRel);
 
 	/* For IMMV, we need to rewrite matview query */
 	if (!skipData)
@@ -719,34 +730,36 @@ get_immv_query(Relation matviewRel)
 }
 
 /*
- * recreate_immv_query
+ * update_immv_viewdef
  *
- * Parse the querystring for this IMMV.  Update the viewdef column in
- * pg_ivm_immv and return the Query tree.
+ * Read the query string for this IMMV from pg_ivm_immv.  Parse the query string
+ * and update the viewdef column with the new Query tree.  Return the Query
+ * tree.
  */
 static Query *
-recreate_immv_query(Relation matviewRel)
+update_immv_viewdef(Relation matviewRel)
 {
-	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
-	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
-	SysScanDesc scan;
-	ScanKeyData key;
-	HeapTuple tup;
-	bool isnull;
+	CreateTableAsStmt *stmt;
 	Datum datum;
-	Query *query = NULL;
+	Datum values[Natts_pg_ivm_immv];
+	HeapTuple newtup = NULL;
+	HeapTuple tup;
 	IntoClause *into;
 	ParseState *pstate = NULL;
-	CreateTableAsStmt *stmt;
-	const char *querystring;
-	const char *relname;
-	const char *querytree;
+	Query *query = NULL;
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	ScanKeyData key;
+	SysScanDesc scan;
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
 
-	Datum values[Natts_pg_ivm_immv];
+	bool isnull;
 	bool nulls[Natts_pg_ivm_immv];
 	bool replaces[Natts_pg_ivm_immv];
-	HeapTuple newtup = NULL;
+	const char *querystring;
+	const char *querytree;
+	const char *relname;
 
+	/* Scan pg_ivm_immv for the given IMMV entry. */
 	ScanKeyInit(&key,
 			    Anum_pg_ivm_immv_immvrelid,
 				BTEqualStrategyNumber, F_OIDEQ,
@@ -763,10 +776,12 @@ recreate_immv_query(Relation matviewRel)
 		return NULL;
 	}
 
+	/* Read the query string column. */
 	datum = heap_getattr(tup, Anum_pg_ivm_immv_querystring, tupdesc, &isnull);
 	Assert(!isnull);
 	querystring = TextDatumGetCString(datum);
 
+	/* Parse the query string using the same logic as create_immv. */
 	relname = psprintf("%s.%s",
 					   get_namespace_name(get_rel_namespace(matviewRel->rd_id)),
 					   get_rel_name(matviewRel->rd_id));
@@ -779,6 +794,7 @@ recreate_immv_query(Relation matviewRel)
 	query = rewriteQueryForIMMV(query, into->colNames);
 	querytree = nodeToString((Node *) query);
 
+	/* Update the pg_ivm_immv tuple with the new query tree. */
 	memset(values, 0, sizeof(values));
 	memset(nulls, 0, sizeof(nulls));
 	memset(replaces, 0, sizeof(replaces));
