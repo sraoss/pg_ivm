@@ -295,7 +295,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		/* Create an index on incremental maintainable materialized view, if possible */
 		CreateIndexOnIMMV(query, matviewRel);
 
-		/* Create triggers to prevent IMMV from beeing changed */
+		/* Create triggers to prevent IMMV from being changed */
 		CreateChangePreventTrigger(address.objectId);
 
 		table_close(matviewRel, NoLock);
@@ -332,7 +332,7 @@ rewriteQueryForIMMV(Query *query, List *colNames)
 	FuncCall *fn;
 
 	/*
-	 * Check the length of colunm name list not to override names of
+	 * Check the length of column name list not to override names of
 	 * additional columns
 	 */
 	if (list_length(colNames) > list_length(query->targetList))
@@ -1001,7 +1001,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							 errmsg("WITH query name %s is not supported on incrementally maintainable materialized view", cte->ctename)));
 
 				/*
-				 * When a table in a unreferenced CTE is TRUNCATEd, the contents of the
+				 * When a table in an unreferenced CTE is TRUNCATEd, the contents of the
 				 * IMMV is not affected so it must not be truncated. For confirming it
 				 * at the maintenance time, we have to check if the modified table used
 				 * in a CTE is actually referenced. Although it would be possible, we
@@ -1043,7 +1043,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 				check_ivm_restriction_walker((Node *) from->fromlist, context);
 
 				/*
-				 * EXIEST is allowed directly under FROM clause
+				 * EXIST is allowed directly under FROM clause
 				 */
 				context->allow_exists = true;
 				check_ivm_restriction_walker(from->quals, context);
@@ -1115,7 +1115,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 							Node *opnode = (Node *) lfirst(lc);
 
 							/*
-							 * EXIEST is allowed under AND expression only if it is
+							 * EXIST is allowed under AND expression only if it is
 							 * directly under WHERE.
 							 */
 							if (allow_exists)
@@ -1354,8 +1354,8 @@ check_aggregate_supports_ivm(Oid aggfnoid)
  * Create a unique index on incremental maintainable materialized view.
  * If the view definition query has a GROUP BY clause, the index is created
  * on the columns of GROUP BY expressions. Otherwise, if the view contains
- * all primary key attritubes of its base tables in the target list, the index
- * is created on these attritubes. In other cases, no index is created.
+ * all primary key attributes of its base tables in the target list, the index
+ * is created on these attributes. In other cases, no index is created.
  */
 void
 CreateIndexOnIMMV(Query *query, Relation matviewRel)
@@ -1541,7 +1541,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 					idxname, RelationGetRelationName(matviewRel))));
 
 	/*
-	 * Make dependencies so that the index is dropped if any base tables's
+	 * Make dependencies so that the index is dropped if any base tables'
 	 * primary key is dropped.
 	 */
 	foreach(lc, constraintList)
@@ -1704,7 +1704,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 }
 
 /*
- * Store the query for the IMMV to pg_ivwm_immv
+ * Store the query for the IMMV to pg_ivm_immv
  */
 static void
 StoreImmvQuery(Oid viewOid, Query *viewQuery)
