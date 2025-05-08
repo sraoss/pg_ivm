@@ -1,3 +1,7 @@
+ALTER SYSTEM SET session_preload_libraries = pg_ivm;
+SELECT pg_reload_conf();
+\c -
+
 CREATE EXTENSION pg_ivm;
 GRANT ALL ON SCHEMA public TO public;
 
