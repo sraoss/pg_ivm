@@ -81,6 +81,21 @@ SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
  4 | 40 | 104
 (4 rows)
 
+-- test for renaming column name to camel style
+BEGIN;
+ALTER TABLE mv_base_a RENAME i TO "I";
+ALTER TABLE mv_base_a RENAME j TO "J";
+UPDATE mv_base_a SET "J" = 0 WHERE "I" = 1;
+SELECT * FROM mv_ivm_1 ORDER BY 1,2,3;
+ i | j  |  k  
+---+----+-----
+ 1 |  0 | 101
+ 2 | 20 | 102
+ 3 | 30 | 103
+ 4 | 40 | 104
+(4 rows)
+
+ROLLBACK;
 -- TRUNCATE a base table in join views
 BEGIN;
 TRUNCATE mv_base_a;
