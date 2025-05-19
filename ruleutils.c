@@ -43,6 +43,13 @@ char *
 pg_ivm_get_viewdef(Relation immvrel, bool pretty)
 {
 	Query *query = get_immv_query(immvrel);
+
+	return pg_ivm_get_viewdef_internal(query, immvrel, pretty);
+}
+
+char *
+pg_ivm_get_viewdef_internal(Query *query, Relation immvrel, bool pretty)
+{
 	TupleDesc resultDesc = RelationGetDescr(immvrel);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 150000)

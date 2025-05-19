@@ -20,12 +20,13 @@
 #include "tcop/dest.h"
 #include "utils/queryenvironment.h"
 
-#define Natts_pg_ivm_immv 4
+#define Natts_pg_ivm_immv 5
 
 #define Anum_pg_ivm_immv_immvrelid 1
 #define Anum_pg_ivm_immv_viewdef 2
 #define Anum_pg_ivm_immv_ispopulated 3
 #define Anum_pg_ivm_immv_lastivmupdate 4
+#define Anum_pg_ivm_immv_querystring 5
 
 /* pg_ivm.c */
 
@@ -34,6 +35,8 @@ extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
 extern bool isImmv(Oid immv_oid);
 extern List *PgIvmFuncName(char *name);
+extern void parse_immv_query(const char *relname, const char *sql,
+							 Query **query_ret, ParseState **pstate_ret);
 
 /* createas.c */
 
@@ -64,8 +67,13 @@ extern bool isIvmName(const char *s);
 /* ruleutils.c */
 
 extern char *pg_ivm_get_viewdef(Relation immvrel, bool pretty);
+extern char *pg_ivm_get_viewdef_internal(Query *query, Relation immvrel, bool pretty);
 
 /* subselect.c */
 extern void inline_cte(PlannerInfo *root, CommonTableExpr *cte);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+extern void RestrictSearchPath(void);
+#endif
 
 #endif
