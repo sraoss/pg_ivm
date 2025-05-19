@@ -50,6 +50,7 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/typcache.h"
+#include "utils/uuid.h"
 #include "utils/xid8.h"
 
 #include "pg_ivm.h"
@@ -251,6 +252,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 {
 	Oid			matviewOid;
 	LOCKMODE	lockmode;
+	ImmvAddress	immv_addr;
 
 	/* Determine strength of lock needed. */
 	//concurrent = stmt->concurrent;
@@ -272,7 +274,12 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
 										  NULL);
 #endif
 
-	return RefreshImmvByOid(matviewOid, false, skipData, queryString, qc);
+	immv_addr.address.classId = RelationRelationId;
+	immv_addr.address.objectId = matviewOid;
+	immv_addr.address.objectSubId = 0;
+
+	// TODO: get uuid
+	return RefreshImmvByOid(immv_addr, false, skipData, queryString, qc);
 }
 
 /*
@@ -283,7 +290,7 @@ ExecRefreshImmv(const RangeVar *relation, bool skipData,
  * This imitates PostgreSQL's RefreshMatViewByOid().
  */
 ObjectAddress
-RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
+RefreshImmvByOid(ImmvAddress immv_addr, bool is_create, bool skipData,
 				 const char *queryString, QueryCompletion *qc)
 {
 	Relation	matviewRel;
@@ -300,6 +307,7 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 	int			save_nestlevel;
 	ObjectAddress address;
 	bool oldPopulated;
+	Oid			matviewOid = immv_addr.address.objectId;
 
 	Relation pgIvmImmv;
 	TupleDesc tupdesc;
@@ -486,10 +494,7 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 	 * is created.
 	 */
 	if (!skipData && !oldPopulated)
-	{
-		CreateIvmTriggersOnBaseTables(dataQuery, matviewOid);
-		CreateChangePreventTrigger(matviewOid);
-	}
+		CreateIvmTriggersOnBaseTables(dataQuery, immv_addr);
 
 	/*
 	 * Create the transient table that will receive the regenerated data. Lock
@@ -844,15 +849,17 @@ Datum
 IVM_immediate_before(PG_FUNCTION_ARGS)
 {
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
-	char	   *matviewOid_text = trigdata->tg_trigger->tgargs[0];
+	char	   *immv_uuid_text = trigdata->tg_trigger->tgargs[0];
 	char	   *ex_lock_text = trigdata->tg_trigger->tgargs[1];
+	pg_uuid_t  *immv_uuid;
 	Oid			matviewOid;
 	MV_TriggerHashEntry *entry;
 	bool	found;
 	bool	ex_lock;
 
-	matviewOid = DatumGetObjectId(DirectFunctionCall1(oidin, CStringGetDatum(matviewOid_text)));
+	immv_uuid = DatumGetUUIDP(CStringGetDatum(immv_uuid_text));
 	ex_lock = DatumGetBool(DirectFunctionCall1(boolin, CStringGetDatum(ex_lock_text)));
+	matviewOid = GetImmvRelid(immv_uuid);
 
 	/* If the view has more than one tables, we have to use an exclusive lock. */
 	if (ex_lock)
@@ -967,10 +974,11 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	Oid			matviewOid;
 	Query	   *query;
 	Query	   *rewritten = NULL;
-	char	   *matviewOid_text = trigdata->tg_trigger->tgargs[0];
+	char	   *immv_uuid_text = trigdata->tg_trigger->tgargs[0];
 	Relation	matviewRel;
 	int old_depth = immv_maintenance_depth;
 	SubTransactionId subxid;
+	pg_uuid_t  *immv_uuid;
 
 	Oid			relowner;
 	Tuplestorestate *old_tuplestore = NULL;
@@ -998,7 +1006,8 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	rel = trigdata->tg_relation;
 	relid = rel->rd_id;
 
-	matviewOid = DatumGetObjectId(DirectFunctionCall1(oidin, CStringGetDatum(matviewOid_text)));
+	immv_uuid = DatumGetUUIDP(CStringGetDatum(immv_uuid_text));
+	matviewOid = GetImmvRelid(immv_uuid);
 
 	/*
 	 * On the first call initialize the hashtable

@@ -1,4 +1,6 @@
 ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN querystring text NOT NULL;
+ALTER TABLE pgivm.pg_ivm_immv ADD COLUMN immvuuid uuid NOT NULL;
+ALTER TABLE pgivm.pg_ivm_immv ADD CONSTRAINT pg_ivm_immv_uuid UNIQUE (immvuuid);
 
 CREATE FUNCTION pgivm.recreate_all_immvs() RETURNS VOID LANGUAGE PLPGSQL AS
 $$

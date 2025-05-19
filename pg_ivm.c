@@ -32,6 +32,7 @@
 #include "utils/lsyscache.h"
 #include "utils/regproc.h"
 #include "utils/rel.h"
+#include "utils/uuid.h"
 #include "utils/varlena.h"
 
 #include "pg_ivm.h"
@@ -366,6 +367,17 @@ PgIvmImmvPrimaryKeyIndexId(void)
 }
 
 /*
+ * Get relid of pg_ivm_immv's UUID unique key.
+ */
+Oid
+PgIvmImmvUuidIndexId(void)
+{
+	return RangeVarGetRelid(
+		makeRangeVar("pgivm", "pg_ivm_immv_uuid", -1),
+		AccessShareLock, true);
+}
+
+/*
  * Return the SELECT part of an IMMV
  */
 Datum
@@ -488,3 +500,77 @@ RestrictSearchPath(void)
 					  PGC_S_SESSION, GUC_ACTION_SAVE, true, 0, false);
 }
 #endif
+
+/*
+ * GetImmvOid
+ *
+ * Look up the immvrelid of an IMMV from its immv_uuid.
+ */
+Oid
+GetImmvRelid(pg_uuid_t *immv_uuid)
+{
+	Datum datum;
+	HeapTuple tup;
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	ScanKeyData key;
+	SysScanDesc scan;
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	bool isnull;
+
+	ScanKeyInit(&key, Anum_pg_ivm_immv_immvuuid, BTEqualStrategyNumber,
+				F_UUID_EQ, UUIDPGetDatum(immv_uuid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvUuidIndexId(), true, NULL, 1,
+							  &key);
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return InvalidOid;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_immvrelid, tupdesc, &isnull);
+	Assert(!isnull);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+	return DatumGetObjectId(datum);
+}
+
+/*
+ * GetImmvUuid
+ *
+ * Look up the immv_uuid of an IMMV from its immvrelid.
+ */
+pg_uuid_t *
+GetImmvUuid(Oid immvrelid)
+{
+	Datum datum;
+	HeapTuple tup;
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	ScanKeyData key;
+	SysScanDesc scan;
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	bool isnull;
+
+	ScanKeyInit(&key, Anum_pg_ivm_immv_immvrelid, BTEqualStrategyNumber, F_OIDEQ,
+			ObjectIdGetDatum(immvrelid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+			true, NULL, 1, &key);
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return NULL;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_immvuuid, tupdesc, &isnull);
+	Assert(!isnull);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+	return DatumGetUUIDP(datum);
+}

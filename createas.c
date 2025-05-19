@@ -62,8 +62,8 @@ typedef struct
 } DR_intorel;
 
 /* utility functions for IMMV definition creation */
-static ObjectAddress create_immv_internal(List *attrList, IntoClause *into);
-static ObjectAddress create_immv_nodata(List *tlist, IntoClause *into);
+static ImmvAddress create_immv_internal(List *attrList, IntoClause *into);
+static ImmvAddress create_immv_nodata(List *tlist, IntoClause *into);
 
 typedef struct
 {
@@ -74,15 +74,15 @@ typedef struct
 	int		sublevels_up;		/* (current) nesting depth */
 } check_ivm_restriction_context;
 
-static void CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
+static void CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, ImmvAddress immv_addr,
 									 Relids *relids, bool ex_lock);
-static void CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock);
+static void CreateIvmTrigger(Oid relOid, ImmvAddress immv_addr, int16 type, int16 timing, bool ex_lock);
 static void check_ivm_restriction(Node *node);
 static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context);
 static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constraintList);
 static bool check_aggregate_supports_ivm(Oid aggfnoid);
 
-static void StoreImmvQuery(Oid viewOid, Query *viewQuery);
+static void StoreImmvQuery(ImmvAddress immv_addr, Query *viewQuery);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
 static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
@@ -96,14 +96,15 @@ static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
  *
  * This imitates PostgreSQL's create_ctas_internal().
  */
-static ObjectAddress
+static ImmvAddress
 create_immv_internal(List *attrList, IntoClause *into)
 {
 	CreateStmt *create = makeNode(CreateStmt);
 	char		relkind;
 	Datum		toast_options;
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-	ObjectAddress intoRelationAddr;
+	ImmvAddress	immv_addr;
+	pg_uuid_t	*immv_uuid;
 
 	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
 	/* relkind of IMMV must be RELKIND_RELATION */
@@ -128,7 +129,12 @@ create_immv_internal(List *attrList, IntoClause *into)
 	 * Create the relation.  (This will error out if there's an existing view,
 	 * so we don't need more code to complain if "replace" is false.)
 	 */
-	intoRelationAddr = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
+	immv_addr.address = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
+	/* Generate the IMMV UUID. */
+	// TODO: check for hash collision
+	immv_uuid = DatumGetUUIDP(DirectFunctionCall1(gen_random_uuid, (Datum) NULL));
+	memcpy(&immv_addr.immv_uuid, immv_uuid, sizeof(*immv_uuid));
+	pfree(immv_uuid);
 
 	/*
 	 * If necessary, create a TOAST table for the target table.  Note that
@@ -146,13 +152,13 @@ create_immv_internal(List *attrList, IntoClause *into)
 
 	(void) heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
 
-	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
+	NewRelationCreateToastTable(immv_addr.address.objectId, toast_options);
 
 	/* Create the "view" part of an IMMV. */
-	StoreImmvQuery(intoRelationAddr.objectId, (Query *) into->viewQuery);
+	StoreImmvQuery(immv_addr, (Query *) into->viewQuery);
 	CommandCounterIncrement();
 
-	return intoRelationAddr;
+	return immv_addr;
 }
 
 /*
@@ -163,7 +169,7 @@ create_immv_internal(List *attrList, IntoClause *into)
  *
  * This imitates PostgreSQL's create_ctas_nodata().
  */
-static ObjectAddress
+static ImmvAddress
 create_immv_nodata(List *tlist, IntoClause *into)
 {
 	List	   *attrList;
@@ -240,7 +246,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	Query	   *query = castNode(Query, stmt->query);
 	IntoClause *into = stmt->into;
 	bool		do_refresh = false;
-	ObjectAddress address;
+	ImmvAddress	immv_addr;
 
 	/* Check if the relation exists or not */
 	if (CreateTableAsRelExists(stmt))
@@ -275,7 +281,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
 	 * from running the planner before all dependencies are set up.
 	 */
-	address = create_immv_nodata(query->targetList, into);
+	immv_addr = create_immv_nodata(query->targetList, into);
 
 	/*
 	 * For materialized views, reuse the REFRESH logic, which locks down
@@ -286,18 +292,18 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	{
 		Relation matviewRel;
 
-		RefreshImmvByOid(address.objectId, true, false, pstate->p_sourcetext, qc);
+		RefreshImmvByOid(immv_addr, true, false, pstate->p_sourcetext, qc);
 
 		if (qc)
 			qc->commandTag = CMDTAG_SELECT;
 
-		matviewRel = table_open(address.objectId, NoLock);
+		matviewRel = table_open(immv_addr.address.objectId, NoLock);
 
 		/* Create an index on incremental maintainable materialized view, if possible */
 		CreateIndexOnIMMV(query, matviewRel);
 
 		/* Create triggers to prevent IMMV from being changed */
-		CreateChangePreventTrigger(address.objectId);
+		CreateChangePreventTrigger(immv_addr.address.objectId);
 
 		table_close(matviewRel, NoLock);
 
@@ -309,7 +315,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 							 "or execute refresh_immv to make sure the view is consistent.")));
 	}
 
-	return address;
+	return immv_addr.address;
 }
 
 /*
@@ -548,7 +554,7 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
  * CreateIvmTriggersOnBaseTables -- create IVM triggers on all base tables
  */
 void
-CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid)
+CreateIvmTriggersOnBaseTables(Query *qry, ImmvAddress immv_addr)
 {
 	Relids	relids = NULL;
 	bool	ex_lock = false;
@@ -582,13 +588,13 @@ CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid)
 		qry->distinctClause || (qry->hasAggs && qry->groupClause))
 		ex_lock = true;
 
-	CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *)qry, matviewOid, &relids, ex_lock);
+	CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *)qry, immv_addr, &relids, ex_lock);
 
 	bms_free(relids);
 }
 
 static void
-CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
+CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, ImmvAddress immv_addr,
 									 Relids *relids, bool ex_lock)
 {
 	if (node == NULL)
@@ -604,12 +610,12 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				Query *query = (Query *) node;
 				ListCell *lc;
 
-				CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *) query->jointree, matviewOid, relids, ex_lock);
+				CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *) query->jointree, immv_addr, relids, ex_lock);
 				foreach(lc, query->cteList)
 				{
 					CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
 					Assert(IsA(cte->ctequery, Query));
-					CreateIvmTriggersOnBaseTablesRecurse((Query *) cte->ctequery, cte->ctequery, matviewOid, relids, ex_lock);
+					CreateIvmTriggersOnBaseTablesRecurse((Query *) cte->ctequery, cte->ctequery, immv_addr, relids, ex_lock);
 				}
 			}
 			break;
@@ -621,14 +627,14 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 
 				if (rte->rtekind == RTE_RELATION && !bms_is_member(rte->relid, *relids))
 				{
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_BEFORE, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_BEFORE, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_UPDATE, TRIGGER_TYPE_BEFORE, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_TRUNCATE, TRIGGER_TYPE_BEFORE, true);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_AFTER, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_AFTER, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_UPDATE, TRIGGER_TYPE_AFTER, ex_lock);
-					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_TRUNCATE, TRIGGER_TYPE_AFTER, true);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_BEFORE, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_BEFORE, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_UPDATE, TRIGGER_TYPE_BEFORE, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_TRUNCATE, TRIGGER_TYPE_BEFORE, true);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_AFTER, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_AFTER, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_UPDATE, TRIGGER_TYPE_AFTER, ex_lock);
+					CreateIvmTrigger(rte->relid, immv_addr, TRIGGER_TYPE_TRUNCATE, TRIGGER_TYPE_AFTER, true);
 
 					*relids = bms_add_member(*relids, rte->relid);
 				}
@@ -636,7 +642,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				{
 					Query *subquery = rte->subquery;
 					Assert(rte->subquery != NULL);
-					CreateIvmTriggersOnBaseTablesRecurse(subquery, (Node *) subquery, matviewOid, relids, ex_lock);
+					CreateIvmTriggersOnBaseTablesRecurse(subquery, (Node *) subquery, immv_addr, relids, ex_lock);
 				}
 			}
 			break;
@@ -647,7 +653,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				ListCell   *l;
 
 				foreach(l, f->fromlist)
-					CreateIvmTriggersOnBaseTablesRecurse(qry, lfirst(l), matviewOid, relids, ex_lock);
+					CreateIvmTriggersOnBaseTablesRecurse(qry, lfirst(l), immv_addr, relids, ex_lock);
 			}
 			break;
 
@@ -655,8 +661,8 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 			{
 				JoinExpr   *j = (JoinExpr *) node;
 
-				CreateIvmTriggersOnBaseTablesRecurse(qry, j->larg, matviewOid, relids, ex_lock);
-				CreateIvmTriggersOnBaseTablesRecurse(qry, j->rarg, matviewOid, relids, ex_lock);
+				CreateIvmTriggersOnBaseTablesRecurse(qry, j->larg, immv_addr, relids, ex_lock);
+				CreateIvmTriggersOnBaseTablesRecurse(qry, j->rarg, immv_addr, relids, ex_lock);
 			}
 			break;
 
@@ -669,7 +675,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
  * CreateIvmTrigger -- create IVM trigger on a base table
  */
 static void
-CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock)
+CreateIvmTrigger(Oid relOid, ImmvAddress immv_addr, int16 type, int16 timing, bool ex_lock)
 {
 	ObjectAddress	refaddr;
 	ObjectAddress	address;
@@ -679,7 +685,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 	Assert(timing == TRIGGER_TYPE_BEFORE || timing == TRIGGER_TYPE_AFTER);
 
 	refaddr.classId = RelationRelationId;
-	refaddr.objectId = viewOid;
+	refaddr.objectId = immv_addr.address.objectId;
 	refaddr.objectSubId = 0;
 
 	ivm_trigger = makeNode(CreateTrigStmt);
@@ -753,7 +759,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 	ivm_trigger->initdeferred = false;
 	ivm_trigger->constrrel = NULL;
 	ivm_trigger->args = list_make2(
-		makeString(DatumGetPointer(DirectFunctionCall1(oidout, ObjectIdGetDatum(viewOid)))),
+		makeString(DatumGetPointer(UUIDPGetDatum(&immv_addr.immv_uuid))),
 		makeString(DatumGetPointer(DirectFunctionCall1(boolout, BoolGetDatum(ex_lock))))
 		);
 
@@ -1708,7 +1714,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
  * Store the query for the IMMV to pg_ivm_immv
  */
 static void
-StoreImmvQuery(Oid viewOid, Query *viewQuery)
+StoreImmvQuery(ImmvAddress immv_addr, Query *viewQuery)
 {
 	char   *querytree = nodeToString((Node *) viewQuery);
 	char   *querystring;
@@ -1736,10 +1742,11 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
+	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(immv_addr.address.objectId);
 	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
 	values[Anum_pg_ivm_immv_querystring - 1] = CStringGetTextDatum(querystring);
+	values[Anum_pg_ivm_immv_immvuuid -1 ] = UUIDPGetDatum(&immv_addr.immv_uuid);
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
 
@@ -1749,7 +1756,7 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	CatalogTupleInsert(pgIvmImmv, heapTuple);
 
 	address.classId = RelationRelationId;
-	address.objectId = viewOid;
+	address.objectId = immv_addr.address.objectId;
 	address.objectSubId = 0;
 
 	recordDependencyOnExpr(&address, (Node *) viewQuery, NIL,
