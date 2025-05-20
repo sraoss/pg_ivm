@@ -320,7 +320,6 @@ CreateChangePreventTrigger(Oid matviewOid)
 	ivm_trigger->row = false;
 
 	ivm_trigger->timing = TRIGGER_TYPE_BEFORE;
-	ivm_trigger->trigname = "IVM_prevent_immv_change";
 	ivm_trigger->funcname = PgIvmFuncName("IVM_prevent_immv_change");
 	ivm_trigger->columns = NIL;
 	ivm_trigger->transitionRels = NIL;
@@ -334,8 +333,10 @@ CreateChangePreventTrigger(Oid matviewOid)
 	for (i = 0; i < 4; i++)
 	{
 		ivm_trigger->events = types[i];
+		ivm_trigger->trigname = psprintf("IVM_prevent_immv_change_%d_%d",
+										 matviewOid, i + 1);
 		address = CreateTrigger(ivm_trigger, NULL, matviewOid, InvalidOid, InvalidOid,
-							 InvalidOid, InvalidOid, InvalidOid, NULL, true, false);
+							 InvalidOid, InvalidOid, InvalidOid, NULL, false, false);
 
 		recordDependencyOn(&address, &refaddr, DEPENDENCY_AUTO);
 	}

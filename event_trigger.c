@@ -1,6 +1,7 @@
 #include "postgres.h"
 #include "pg_ivm.h"
 
+#include "access/genam.h"
 #include "access/table.h"
 #include "catalog/indexing.h"
 #include "commands/event_trigger.h"

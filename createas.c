@@ -747,6 +747,8 @@ CreateIvmTrigger(Oid relOid, ImmvAddress immv_addr, int16 type, int16 timing, bo
 	if (type == TRIGGER_TYPE_DELETE || type == TRIGGER_TYPE_UPDATE)
 		ex_lock = true;
 
+	ivm_trigger->trigname = psprintf("%s_%d_%d", ivm_trigger->trigname, relOid,
+									 immv_addr.address.objectId);
 	ivm_trigger->funcname =
 		(timing == TRIGGER_TYPE_BEFORE ?
 			PgIvmFuncName("IVM_immediate_before") : PgIvmFuncName("IVM_immediate_maintenance"));
@@ -759,12 +761,12 @@ CreateIvmTrigger(Oid relOid, ImmvAddress immv_addr, int16 type, int16 timing, bo
 	ivm_trigger->initdeferred = false;
 	ivm_trigger->constrrel = NULL;
 	ivm_trigger->args = list_make2(
-		makeString(DatumGetPointer(UUIDPGetDatum(&immv_addr.immv_uuid))),
+		makeString(DatumGetPointer(DirectFunctionCall1(uuid_out, UUIDPGetDatum(&immv_addr.immv_uuid)))),
 		makeString(DatumGetPointer(DirectFunctionCall1(boolout, BoolGetDatum(ex_lock))))
 		);
 
 	address = CreateTrigger(ivm_trigger, NULL, relOid, InvalidOid, InvalidOid,
-						 InvalidOid, InvalidOid, InvalidOid, NULL, true, false);
+						 InvalidOid, InvalidOid, InvalidOid, NULL, false, false);
 
 	recordDependencyOn(&address, &refaddr, DEPENDENCY_AUTO);
 
@@ -1733,7 +1735,7 @@ StoreImmvQuery(ImmvAddress immv_addr, Query *viewQuery)
 	 */
 	save_nestlevel = NewGUCNestLevel();
 	RestrictSearchPath();
-	matviewRel = table_open(viewOid, AccessShareLock);
+	matviewRel = table_open(immv_addr.address.objectId, AccessShareLock);
 	querystring = pg_ivm_get_viewdef_internal(viewQuery, matviewRel, true);
 	table_close(matviewRel, NoLock);
 	/* Roll back the search_path change. */

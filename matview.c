@@ -857,7 +857,7 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 	bool	found;
 	bool	ex_lock;
 
-	immv_uuid = DatumGetUUIDP(CStringGetDatum(immv_uuid_text));
+	immv_uuid = DatumGetUUIDP(DirectFunctionCall1(uuid_in, (CStringGetDatum(immv_uuid_text))));
 	ex_lock = DatumGetBool(DirectFunctionCall1(boolin, CStringGetDatum(ex_lock_text)));
 	matviewOid = GetImmvRelid(immv_uuid);
 
@@ -1006,7 +1006,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	rel = trigdata->tg_relation;
 	relid = rel->rd_id;
 
-	immv_uuid = DatumGetUUIDP(CStringGetDatum(immv_uuid_text));
+	immv_uuid = DatumGetUUIDP(DirectFunctionCall1(uuid_in, (CStringGetDatum(immv_uuid_text))));
 	matviewOid = GetImmvRelid(immv_uuid);
 
 	/*
