@@ -9,7 +9,8 @@ OBJS = \
 	matview.o \
 	pg_ivm.o \
 	ruleutils.o \
-	subselect.o
+	subselect.o \
+	event_trigger.o
 PGFILEDESC = "pg_ivm - incremental view maintenance on PostgreSQL"
 
 EXTENSION = pg_ivm

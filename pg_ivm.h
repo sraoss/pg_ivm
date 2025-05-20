@@ -72,6 +72,11 @@ extern char *pg_ivm_get_viewdef_internal(Query *query, Relation immvrel, bool pr
 /* subselect.c */
 extern void inline_cte(PlannerInfo *root, CommonTableExpr *cte);
 
+/* event_trigger.c */
+
+extern Datum save_query_string(PG_FUNCTION_ARGS);
+extern Datum restore_query_string(PG_FUNCTION_ARGS);
+
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
 extern void RestrictSearchPath(void);
 #endif

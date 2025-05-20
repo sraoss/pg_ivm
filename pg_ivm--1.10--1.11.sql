@@ -19,34 +19,16 @@ BEGIN
 END
 $$;
 
-CREATE FUNCTION pgivm.refresh_query_strings()
-RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER AS
-$$
-DECLARE
-	old_search_path text;
-BEGIN
-	-- Only need to refresh query strings if an object is renamed.
-	-- As a rough heuristic, check if this is an ALTER command.
-	IF tg_tag LIKE 'ALTER %' THEN
-		-- Empty search path so that get_immv_def returns a fully-qualified query.
-		SELECT setting INTO old_search_path FROM pg_catalog.pg_settings
-			WHERE name = 'search_path';
-		SET search_path = '';
+CREATE FUNCTION pgivm.save_query_strings() RETURNS event_trigger
+AS 'MODULE_PATHNAME', 'save_query_strings' LANGUAGE C;
 
-		UPDATE pgivm.pg_ivm_immv SET querystring = pgivm.get_immv_def(immvrelid);
+CREATE FUNCTION pgivm.restore_query_strings() RETURNS event_trigger
+AS 'MODULE_PATHNAME', 'restore_query_strings' LANGUAGE C;
 
-		-- Reset search path to the original value.
-		IF old_search_path != '' AND old_search_path != '""' THEN
-			EXECUTE format('SET search_path = %s', old_search_path);
-		END IF;
-	END IF;
-EXCEPTION
-	WHEN internal_error THEN
-		RAISE WARNING 'pg_ivm could not refresh the pg_ivm_immv query strings.'
-			USING HINT = 'Please recreate your IMMVs using pgivm.recreate_all_immvs().';
-END
-$$;
+CREATE EVENT TRIGGER save_query_strings
+ON ddl_command_start
+EXECUTE FUNCTION pgivm.save_query_strings();
 
-CREATE EVENT TRIGGER refresh_query_strings
+CREATE EVENT TRIGGER restore_query_strings
 ON ddl_command_end
-EXECUTE FUNCTION pgivm.refresh_query_strings();
+EXECUTE FUNCTION pgivm.restore_query_strings();
