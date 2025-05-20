@@ -52,10 +52,10 @@ extern ObjectAddress ExecRefreshImmv(const RangeVar *relation, bool skipData,
 extern ObjectAddress RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 									  const char *queryString, QueryCompletion *qc);
 extern bool ImmvIncrementalMaintenanceIsEnabled(void);
-extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
-extern Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum IVM_immediate_before(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum IVM_immediate_maintenance(PG_FUNCTION_ARGS);
 extern Query* rewrite_query_for_exists_subquery(Query *query);
-extern Datum ivm_visible_in_prestate(PG_FUNCTION_ARGS);
+extern PGDLLEXPORT Datum ivm_visible_in_prestate(PG_FUNCTION_ARGS);
 extern void AtAbort_IVM(SubTransactionId subtxid);
 extern void AtPreCommit_IVM(void);
 extern char *getColumnNameStartWith(RangeTblEntry *rte, char *str, int *attnum);
