@@ -130,8 +130,10 @@ create_immv_internal(List *attrList, IntoClause *into)
 	 * so we don't need more code to complain if "replace" is false.)
 	 */
 	immv_addr.address = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
-	/* Generate the IMMV UUID. */
-	// TODO: check for hash collision
+	/*
+	 * Generate the IMMV UUID.
+	 * TODO: check for hash collision
+	 */
 	immv_uuid = DatumGetUUIDP(DirectFunctionCall1(gen_random_uuid, (Datum) NULL));
 	memcpy(&immv_addr.immv_uuid, immv_uuid, sizeof(*immv_uuid));
 	pfree(immv_uuid);
@@ -1718,7 +1720,6 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 static void
 StoreImmvQuery(ImmvAddress immv_addr, Query *viewQuery)
 {
-	char   *querytree = nodeToString((Node *) viewQuery);
 	char   *querystring;
 	int		save_nestlevel;
 	Datum values[Natts_pg_ivm_immv];
@@ -1745,10 +1746,9 @@ StoreImmvQuery(ImmvAddress immv_addr, Query *viewQuery)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(immv_addr.address.objectId);
-	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
-	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
-	values[Anum_pg_ivm_immv_querystring - 1] = CStringGetTextDatum(querystring);
 	values[Anum_pg_ivm_immv_immvuuid -1 ] = UUIDPGetDatum(&immv_addr.immv_uuid);
+	values[Anum_pg_ivm_immv_querystring - 1] = CStringGetTextDatum(querystring);
+	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
 

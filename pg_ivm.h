@@ -21,15 +21,19 @@
 #include "utils/queryenvironment.h"
 #include "utils/uuid.h"
 
-#define Natts_pg_ivm_immv 6
+#define Natts_pg_ivm_immv 5
 
 #define Anum_pg_ivm_immv_immvrelid 1
-#define Anum_pg_ivm_immv_viewdef 2
-#define Anum_pg_ivm_immv_ispopulated 3
-#define Anum_pg_ivm_immv_lastivmupdate 4
-#define Anum_pg_ivm_immv_querystring 5
-#define Anum_pg_ivm_immv_immvuuid 6
+#define Anum_pg_ivm_immv_immvuuid 2
+#define Anum_pg_ivm_immv_querystring 3
+#define Anum_pg_ivm_immv_ispopulated 4
+#define Anum_pg_ivm_immv_lastivmupdate 5
 
+/*
+ * This struct uniquely identifies in IMMV.  It consists of an ObjectAddress
+ * (OID of the IMMV table and its schema) as well as a pg_uuid_t (which is
+ * stored in the pg_ivm_immv table).
+ */
 typedef struct ImmvAddress
 {
 	ObjectAddress	address;

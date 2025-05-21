@@ -234,8 +234,6 @@ static void clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
 static void setLastUpdateXid(Oid immv_oid, FullTransactionId xid);
 static FullTransactionId getLastUpdateXid(Oid immv_oid);
 
-static Query *update_immv_viewdef(Relation matviewRel);
-
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(IVM_immediate_before);
 PG_FUNCTION_INFO_V1(IVM_immediate_maintenance);
@@ -397,18 +395,7 @@ RefreshImmvByOid(ImmvAddress immv_addr, bool is_create, bool skipData,
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);
 
-	/*
-	 * Recreate the Query tree from the query string to account for changing
-	 * base table OIDs (e.g. after dump/restore) or changing format of the Query
-	 * node (after pg_upgrade).
-	 *
-	 * No need to create the Query tree a second time if we are creating a new
-	 * IMMV.
-	 */
-	if (is_create)
-		viewQuery = get_immv_query(matviewRel);
-	else
-		viewQuery = update_immv_viewdef(matviewRel);
+	viewQuery = get_immv_query(matviewRel);
 
 	/* For IMMV, we need to rewrite matview query */
 	if (!skipData)
@@ -707,6 +694,9 @@ get_immv_query(Relation matviewRel)
 	bool isnull;
 	Datum datum;
 	Query *query;
+	char *querystring;
+	char *relname;
+	ParseState *parse_state;
 
 	ScanKeyInit(&key,
 			    Anum_pg_ivm_immv_immvrelid,
@@ -724,91 +714,16 @@ get_immv_query(Relation matviewRel)
 		return NULL;
 	}
 
-	datum = heap_getattr(tup, Anum_pg_ivm_immv_viewdef, tupdesc, &isnull);
-	Assert(!isnull);
-	query = (Query *) stringToNode(TextDatumGetCString(datum));
-
-	systable_endscan(scan);
-	table_close(pgIvmImmv, NoLock);
-
-	return query;
-}
-
-/*
- * update_immv_viewdef
- *
- * Read the query string for this IMMV from pg_ivm_immv.  Parse the query string
- * and update the viewdef column with the new Query tree.  Return the Query
- * tree.
- */
-static Query *
-update_immv_viewdef(Relation matviewRel)
-{
-	CreateTableAsStmt *stmt;
-	Datum datum;
-	Datum values[Natts_pg_ivm_immv];
-	HeapTuple newtup = NULL;
-	HeapTuple tup;
-	IntoClause *into;
-	ParseState *pstate = NULL;
-	Query *query = NULL;
-	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
-	ScanKeyData key;
-	SysScanDesc scan;
-	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
-
-	bool isnull;
-	bool nulls[Natts_pg_ivm_immv];
-	bool replaces[Natts_pg_ivm_immv];
-	const char *querystring;
-	const char *querytree;
-	const char *relname;
-
-	/* Scan pg_ivm_immv for the given IMMV entry. */
-	ScanKeyInit(&key,
-			    Anum_pg_ivm_immv_immvrelid,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(RelationGetRelid(matviewRel)));
-	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
-								  true, NULL, 1, &key);
-
-	tup = systable_getnext(scan);
-
-	if (!HeapTupleIsValid(tup))
-	{
-		systable_endscan(scan);
-		table_close(pgIvmImmv, NoLock);
-		return NULL;
-	}
-
-	/* Read the query string column. */
 	datum = heap_getattr(tup, Anum_pg_ivm_immv_querystring, tupdesc, &isnull);
 	Assert(!isnull);
 	querystring = TextDatumGetCString(datum);
 
-	/* Parse the query string using the same logic as create_immv. */
 	relname = psprintf("%s.%s",
 					   get_namespace_name(get_rel_namespace(matviewRel->rd_id)),
 					   get_rel_name(matviewRel->rd_id));
 
-	parse_immv_query(relname, querystring, &query, &pstate);
-	stmt = castNode(CreateTableAsStmt, query->utilityStmt);
-	into = stmt->into;
-
-	query = castNode(Query, stmt->query);
-	query = rewriteQueryForIMMV(query, into->colNames);
-	querytree = nodeToString((Node *) query);
-
-	/* Update the pg_ivm_immv tuple with the new query tree. */
-	memset(values, 0, sizeof(values));
-	memset(nulls, 0, sizeof(nulls));
-	memset(replaces, 0, sizeof(replaces));
-	values[Anum_pg_ivm_immv_viewdef - 1] = CStringGetTextDatum(querytree);
-	replaces[Anum_pg_ivm_immv_viewdef - 1] = true;
-
-	newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
-	CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
-	heap_freetuple(newtup);
+	parse_immv_query(relname, querystring, &query, &parse_state);
+	query = (Query *) ((CreateTableAsStmt *) query->utilityStmt)->into->viewQuery;
 
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);

@@ -14,6 +14,22 @@
 
 #define IMMV_INIT_QUERYHASHSIZE 16
 
+/*
+ * This file defines the DDL event triggers that maintain pgivm.pg_ivm_immv.
+ *
+ * Every time an ALTER RENAME statement is executed, the save_query_strings
+ * pre-event trigger will parse each IMMV's query string and store the Query
+ * nodes in a hash table.  Then, the restore_query_strings post-event trigger
+ * will take each Query node and re-create the query string.
+ *
+ * This allows the querystring column to remain up to date when any objects are
+ * renamed.
+ *
+ * TODO: This uses a brute force approach to checking if re-parse is necessary.
+ * Even if an unrelated object is renamed, these event triggers still fire.  Can
+ * figure out a more precise heuristic.
+ */
+
 typedef struct HashEntry
 {
 	Oid			immv_relid;
@@ -35,6 +51,9 @@ static void save_query_strings_internal(void);
 PG_FUNCTION_INFO_V1(save_query_strings);
 PG_FUNCTION_INFO_V1(restore_query_strings);
 
+/*
+ * Pre-DDL event trigger function.
+ */
 Datum
 save_query_strings(PG_FUNCTION_ARGS)
 {
@@ -55,6 +74,9 @@ save_query_strings(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
+/*
+ * Post-DDL event trigger function.
+ */
 Datum
 restore_query_strings(PG_FUNCTION_ARGS)
 {
@@ -73,6 +95,9 @@ restore_query_strings(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
+/*
+ * Initialize the hash table.
+ */
 static void
 initialize_query_cache(void)
 {
@@ -85,6 +110,9 @@ initialize_query_cache(void)
 								   &ctl, HASH_ELEM | HASH_BLOBS);
 }
 
+/*
+ * Store a query node in the hash table.
+ */
 static void
 hash_query(Oid immv_relid, char *query)
 {
@@ -103,6 +131,9 @@ hash_query(Oid immv_relid, char *query)
 	MemoryContextSwitchTo(old_cxt);
 }
 
+/*
+ * Retrieve a query node from the hash table.
+ */
 static char *
 retrieve_query(Oid immv_relid)
 {
@@ -125,6 +156,10 @@ retrieve_query(Oid immv_relid)
 	return query;
 }
 
+/*
+ * Iterate through the pg_ivm_immv table and parse the querystring of each
+ * entry.  Store the query nodes in the hash table.
+ */
 static void
 save_query_strings_internal(void)
 {
@@ -162,6 +197,7 @@ save_query_strings_internal(void)
 
 		/* Parse the existing IMMV query pre-DDL.  Add it to the list. */
 		parse_immv_query(matview_relname, query_string, &query, &parse_state);
+		query = (Query *) ((CreateTableAsStmt *) query->utilityStmt)->into->viewQuery;
 
 		/* Store entry for this IMMV. */
 		hash_query(matview_oid, nodeToString(query));
@@ -171,6 +207,11 @@ save_query_strings_internal(void)
 	table_close(pg_ivm_immv_rel, NoLock);
 }
 
+/*
+ * Iterate through the pg_ivm_immv table.  For each entry, get its Query node
+ * from the hash table and reconstruct the query string.  Update the row entry
+ * with the reconstructed query string.
+ */
 static void
 restore_query_strings_internal(void)
 {
@@ -211,7 +252,6 @@ restore_query_strings_internal(void)
 
 		serialized_query = retrieve_query(matview_oid);
 		query = stringToNode(serialized_query);
-		query = (Query *) ((CreateTableAsStmt *) query->utilityStmt)->into->viewQuery;
 
 		matview_rel = table_open(matview_oid, AccessShareLock);
 		new_query_string = pg_ivm_get_viewdef_internal(query, matview_rel, true);
