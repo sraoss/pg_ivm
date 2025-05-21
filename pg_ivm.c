@@ -32,6 +32,7 @@
 #include "utils/lsyscache.h"
 #include "utils/regproc.h"
 #include "utils/rel.h"
+#include "utils/uuid.h"
 #include "utils/varlena.h"
 
 #include "pg_ivm.h"
@@ -177,17 +178,39 @@ create_immv(PG_FUNCTION_ARGS)
 	text	*t_sql = PG_GETARG_TEXT_PP(1);
 	char	*relname = text_to_cstring(t_relname);
 	char	*sql = text_to_cstring(t_sql);
+
+	Query	*query = NULL;
+	QueryCompletion qc;
+	ParseState	*pstate = NULL;
+
+	parse_immv_query(relname, sql, &query, &pstate);
+
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
+
+	PG_RETURN_INT64(qc.nprocessed);
+}
+
+/*
+ * parse_immv_query
+ *
+ * Parse an IMMV definition query and return the Query tree and ParseState using
+ * the supplied pointers.
+ */
+void
+parse_immv_query(const char *relname, const char *sql, Query **query_ret,
+				 ParseState **pstate_ret)
+{
 	List	*parsetree_list;
 	RawStmt	*parsetree;
-	Query	*query;
-	QueryCompletion qc;
 	List	*names = NIL;
 	List	*colNames = NIL;
 
-	ParseState *pstate = make_parsestate(NULL);
 	CreateTableAsStmt *ctas;
 	StringInfoData command_buf;
+	Query	*query;
+	ParseState	*pstate;
 
+	pstate = make_parsestate(NULL);
 	parseNameAndColumns(relname, &names, &colNames);
 
 	initStringInfo(&command_buf);
@@ -230,9 +253,8 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *)ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
-
-	PG_RETURN_INT64(qc.nprocessed);
+	*query_ret = query;
+	*pstate_ret = pstate;
 }
 
 /*
@@ -298,7 +320,6 @@ CreateChangePreventTrigger(Oid matviewOid)
 	ivm_trigger->row = false;
 
 	ivm_trigger->timing = TRIGGER_TYPE_BEFORE;
-	ivm_trigger->trigname = "IVM_prevent_immv_change";
 	ivm_trigger->funcname = PgIvmFuncName("IVM_prevent_immv_change");
 	ivm_trigger->columns = NIL;
 	ivm_trigger->transitionRels = NIL;
@@ -312,8 +333,10 @@ CreateChangePreventTrigger(Oid matviewOid)
 	for (i = 0; i < 4; i++)
 	{
 		ivm_trigger->events = types[i];
+		ivm_trigger->trigname = psprintf("IVM_prevent_immv_change_%d_%d",
+										 matviewOid, i + 1);
 		address = CreateTrigger(ivm_trigger, NULL, matviewOid, InvalidOid, InvalidOid,
-							 InvalidOid, InvalidOid, InvalidOid, NULL, true, false);
+							 InvalidOid, InvalidOid, InvalidOid, NULL, false, false);
 
 		recordDependencyOn(&address, &refaddr, DEPENDENCY_AUTO);
 	}
@@ -341,6 +364,17 @@ PgIvmImmvPrimaryKeyIndexId(void)
 {
 	return RangeVarGetRelid(
 		makeRangeVar("pgivm", "pg_ivm_immv_pkey", -1),
+		AccessShareLock, true);
+}
+
+/*
+ * Get relid of pg_ivm_immv's UUID unique key.
+ */
+Oid
+PgIvmImmvUuidIndexId(void)
+{
+	return RangeVarGetRelid(
+		makeRangeVar("pgivm", "pg_ivm_immv_uuid", -1),
 		AccessShareLock, true);
 }
 
@@ -457,4 +491,87 @@ List *
 PgIvmFuncName(char *name)
 {
     return list_make2(makeString("pgivm"), makeString(name));
+}
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+void
+RestrictSearchPath(void)
+{
+	set_config_option("search_path", "pg_catalog, pg_temp", PGC_USERSET,
+					  PGC_S_SESSION, GUC_ACTION_SAVE, true, 0, false);
+}
+#endif
+
+/*
+ * GetImmvOid
+ *
+ * Look up the immvrelid of an IMMV from its immv_uuid.
+ */
+Oid
+GetImmvRelid(pg_uuid_t *immv_uuid)
+{
+	Datum datum;
+	HeapTuple tup;
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	ScanKeyData key;
+	SysScanDesc scan;
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	bool isnull;
+
+	ScanKeyInit(&key, Anum_pg_ivm_immv_immvuuid, BTEqualStrategyNumber,
+				F_UUID_EQ, UUIDPGetDatum(immv_uuid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvUuidIndexId(), true, NULL, 1,
+							  &key);
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return InvalidOid;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_immvrelid, tupdesc, &isnull);
+	Assert(!isnull);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+	return DatumGetObjectId(datum);
+}
+
+/*
+ * GetImmvUuid
+ *
+ * Look up the immv_uuid of an IMMV from its immvrelid.
+ */
+pg_uuid_t *
+GetImmvUuid(Oid immvrelid)
+{
+	Datum datum;
+	HeapTuple tup;
+	Relation pgIvmImmv = table_open(PgIvmImmvRelationId(), AccessShareLock);
+	ScanKeyData key;
+	SysScanDesc scan;
+	TupleDesc tupdesc = RelationGetDescr(pgIvmImmv);
+	bool isnull;
+
+	ScanKeyInit(&key, Anum_pg_ivm_immv_immvrelid, BTEqualStrategyNumber, F_OIDEQ,
+			ObjectIdGetDatum(immvrelid));
+	scan = systable_beginscan(pgIvmImmv, PgIvmImmvPrimaryKeyIndexId(),
+			true, NULL, 1, &key);
+	tup = systable_getnext(scan);
+
+	if (!HeapTupleIsValid(tup))
+	{
+		systable_endscan(scan);
+		table_close(pgIvmImmv, NoLock);
+		return NULL;
+	}
+
+	datum = heap_getattr(tup, Anum_pg_ivm_immv_immvuuid, tupdesc, &isnull);
+	Assert(!isnull);
+
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
+	return DatumGetUUIDP(datum);
 }

@@ -19,27 +19,45 @@
 #include "parser/parse_node.h"
 #include "tcop/dest.h"
 #include "utils/queryenvironment.h"
+#include "utils/uuid.h"
 
-#define Natts_pg_ivm_immv 4
+#define Natts_pg_ivm_immv 5
 
 #define Anum_pg_ivm_immv_immvrelid 1
-#define Anum_pg_ivm_immv_viewdef 2
-#define Anum_pg_ivm_immv_ispopulated 3
-#define Anum_pg_ivm_immv_lastivmupdate 4
+#define Anum_pg_ivm_immv_immvuuid 2
+#define Anum_pg_ivm_immv_querystring 3
+#define Anum_pg_ivm_immv_ispopulated 4
+#define Anum_pg_ivm_immv_lastivmupdate 5
+
+/*
+ * This struct uniquely identifies in IMMV.  It consists of an ObjectAddress
+ * (OID of the IMMV table and its schema) as well as a pg_uuid_t (which is
+ * stored in the pg_ivm_immv table).
+ */
+typedef struct ImmvAddress
+{
+	ObjectAddress	address;
+	pg_uuid_t		immv_uuid;
+} ImmvAddress;
 
 /* pg_ivm.c */
 
 extern void CreateChangePreventTrigger(Oid matviewOid);
 extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
+extern Oid PgIvmImmvUuidIndexId(void);
 extern bool isImmv(Oid immv_oid);
 extern List *PgIvmFuncName(char *name);
+extern void parse_immv_query(const char *relname, const char *sql,
+							 Query **query_ret, ParseState **pstate_ret);
+extern Oid GetImmvRelid(pg_uuid_t *immv_uuid);
+extern pg_uuid_t *GetImmvUuid(Oid immvrelid);
 
 /* createas.c */
 
 extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 									QueryCompletion *qc);
-extern void CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid);
+extern void CreateIvmTriggersOnBaseTables(Query *qry, ImmvAddress immv_addr);
 extern void CreateIndexOnIMMV(Query *query, Relation matviewRel);
 extern Query *rewriteQueryForIMMV(Query *query, List *colNames);
 extern void makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *next_resno, List **aggs);
@@ -49,7 +67,7 @@ extern void makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, 
 extern Query *get_immv_query(Relation matviewRel);
 extern ObjectAddress ExecRefreshImmv(const RangeVar *relation, bool skipData,
 									 const char *queryString, QueryCompletion *qc);
-extern ObjectAddress RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
+extern ObjectAddress RefreshImmvByOid(ImmvAddress immv_addr, bool is_create, bool skipData,
 									  const char *queryString, QueryCompletion *qc);
 extern bool ImmvIncrementalMaintenanceIsEnabled(void);
 extern Datum IVM_immediate_before(PG_FUNCTION_ARGS);
@@ -64,8 +82,18 @@ extern bool isIvmName(const char *s);
 /* ruleutils.c */
 
 extern char *pg_ivm_get_viewdef(Relation immvrel, bool pretty);
+extern char *pg_ivm_get_viewdef_internal(Query *query, Relation immvrel, bool pretty);
 
 /* subselect.c */
 extern void inline_cte(PlannerInfo *root, CommonTableExpr *cte);
+
+/* event_trigger.c */
+
+extern Datum save_query_string(PG_FUNCTION_ARGS);
+extern Datum restore_query_string(PG_FUNCTION_ARGS);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+extern void RestrictSearchPath(void);
+#endif
 
 #endif
