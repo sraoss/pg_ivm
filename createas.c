@@ -1723,6 +1723,7 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
 	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
+	isNulls[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
 
 	pgIvmImmv = table_open(PgIvmImmvRelationId(), RowExclusiveLock);
 
