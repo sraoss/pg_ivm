@@ -300,7 +300,7 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
 An IMMV can be dropped using the `DROP TABLE` command. Once an IMMV is dropped, its entry is automatically removed from the `pg_ivm_immv` catalog.
 
 ```sql
-test=# DROP TABLE immv_agg;
+test=# DROP TABLE immv
 DROP TABLE
 
 test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM pgivm.pg_ivm_immv;
@@ -318,7 +318,7 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
 
 ### Renaming an IMMV
 
-An IMMV can be renamed using the `ALTER TABLE` command. Once an IMMV is renamed, its entry is automatically renamed in the `pg_ivm_immv` catalog.
+An IMMV can be renamed using the `ALTER TABLE` command.
 
 ```sql
 test=# ALTER TABLE immv_agg RENAME TO immv_agg2;
