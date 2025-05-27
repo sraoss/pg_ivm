@@ -449,12 +449,13 @@ RefreshImmvByOid(Oid matviewOid, bool is_create, bool skipData,
 					obj.objectId = foundDep->objid;
 					obj.objectSubId = foundDep->refobjsubid;
 					add_exact_object_address(&obj, immv_triggers);
+					deleteDependencyRecordsFor(obj.classId, obj.objectId, false);
 				}
 				systable_endscan(tgscan);
 			}
 		}
 		systable_endscan(scan);
-
+		CommandCounterIncrement();
 		performMultipleDeletions(immv_triggers, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
 
 		table_close(depRel, RowExclusiveLock);
