@@ -759,7 +759,7 @@ CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock
 	address = CreateTrigger(ivm_trigger, NULL, relOid, InvalidOid, InvalidOid,
 						 InvalidOid, InvalidOid, InvalidOid, NULL, true, false);
 
-	recordDependencyOn(&address, &refaddr, DEPENDENCY_AUTO);
+	recordDependencyOn(&address, &refaddr, DEPENDENCY_INTERNAL);
 
 	/* Make changes-so-far visible */
 	CommandCounterIncrement();
