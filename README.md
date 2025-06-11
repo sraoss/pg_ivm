@@ -418,7 +418,7 @@ Even if we are able to acquire a lock, a concurrent transaction may have already
 
 ### Row Level Security
 
-If some base tables have row level security policy, rows that are not visible to the materialized view's owner are excluded from the result.  In addition, such rows are excluded as well when views are incrementally maintained.  However, if a new policy is defined or policies are changed after the materialized view was created, the new policy will not be applied to the view contents.  To apply the new policy, you need to recreate IMMV.
+If some base tables have row level security policy, rows that are not visible to the materialized view's owner are excluded from the result.  In addition, such rows are excluded as well when views are incrementally maintained.  However, if a new policy is defined or policies are changed after the materialized view was created, the new policy will not be applied to the view contents.  To apply the new policy, you need to refresh or recreate the IMMV.
 
 ### How to Disable or Enable Immediate Maintenance
 
