@@ -101,7 +101,11 @@ create_immv_internal(List *attrList, IntoClause *into)
 	CreateStmt *create = makeNode(CreateStmt);
 	char		relkind;
 	Datum		toast_options;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+	const char *const validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 	ObjectAddress intoRelationAddr;
 
 	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
@@ -148,7 +152,12 @@ create_immv_internal(List *attrList, IntoClause *into)
 	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
 
 	/* Create the "view" part of an IMMV. */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+	StoreImmvQuery(intoRelationAddr.objectId, into->viewQuery);
+#else
 	StoreImmvQuery(intoRelationAddr.objectId, (Query *) into->viewQuery);
+#endif
+
 	CommandCounterIncrement();
 
 	return intoRelationAddr;
@@ -1514,10 +1523,18 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 
 		indexRel = index_open(indexoid, AccessShareLock);
 
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+		if (CheckIndexCompatible(indexRel->rd_id,
+								index->accessMethod,
+								index->indexParams,
+								index->excludeOpNames,
+								false))
+#else
 		if (CheckIndexCompatible(indexRel->rd_id,
 								index->accessMethod,
 								index->indexParams,
 								index->excludeOpNames))
+#endif
 			hasCompatibleIndex = true;
 
 		index_close(indexRel, AccessShareLock);
