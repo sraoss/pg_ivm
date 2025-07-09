@@ -224,10 +224,14 @@ create_immv(PG_FUNCTION_ARGS)
 	ctas->into->options = NIL;
 	ctas->into->onCommit = ONCOMMIT_NOOP;
 	ctas->into->tableSpaceName = NULL;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+	ctas->into->viewQuery = (Query *) parsetree->stmt;
+#else
 	ctas->into->viewQuery = parsetree->stmt;
+#endif
 	ctas->into->skipData = false;
 
-	query = transformStmt(pstate, (Node *)ctas);
+	query = transformStmt(pstate, (Node *) ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
 	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);

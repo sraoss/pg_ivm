@@ -617,7 +617,11 @@ refresh_immv_datafill(DestReceiver *dest, Query *query,
 	ExecutorStart(queryDesc, 0);
 
 	/* run the plan */
+#if PG_VERSION_NUM < 180000
 	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+#else
+	ExecutorRun(queryDesc, ForwardScanDirection, 0);
+#endif
 
 	processed = queryDesc->estate->es_processed;
 
