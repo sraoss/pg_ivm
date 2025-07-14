@@ -1,8 +1,30 @@
-# Global excludes across all subdirectories
-*.bc
+# Object files
 *.o
+
+# Coverage files
+*.gcno
+*.gcda
+
+# Libraries
+*.lib
+*.a
+
+# LLVM bitcode
+*.bc
+
+# Shared objects (inc. Windows DLLs)
+*.dll
 *.so
-regression.*
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.app
+
+# Dependencies
+.deps
 
 # Generated subdirectories
 /results/
+/output_iso/
