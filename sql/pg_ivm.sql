@@ -596,16 +596,16 @@ SELECT pgivm.create_immv('mv_ivm_only_values2',  'SELECT * FROM (values(1)) AS t
 
 
 -- views containing base tables with Row Level Security
-DROP USER IF EXISTS ivm_admin;
-DROP USER IF EXISTS ivm_user;
-CREATE USER ivm_admin;
-CREATE USER ivm_user;
+DROP USER IF EXISTS regress_ivm_admin;
+DROP USER IF EXISTS regress_ivm_user;
+CREATE USER regress_ivm_admin;
+CREATE USER regress_ivm_user;
 
 --- create a table with RLS
-SET SESSION AUTHORIZATION ivm_admin;
+SET SESSION AUTHORIZATION regress_ivm_admin;
 CREATE TABLE rls_tbl(id int, data text, owner name);
 INSERT INTO rls_tbl VALUES
-  (1,'foo','ivm_user'),
+  (1,'foo','regress_ivm_user'),
   (2,'bar','postgres');
 CREATE TABLE num_tbl(id int, num text);
 INSERT INTO num_tbl VALUES
@@ -622,28 +622,28 @@ ALTER TABLE rls_tbl ENABLE ROW LEVEL SECURITY;
 GRANT ALL on rls_tbl TO PUBLIC;
 GRANT ALL on num_tbl TO PUBLIC;
 
---- create a view owned by ivm_user
-SET SESSION AUTHORIZATION ivm_user;
+--- create a view owned by regress_ivm_user
+SET SESSION AUTHORIZATION regress_ivm_user;
 SELECT pgivm.create_immv('ivm_rls', 'SELECT * FROM rls_tbl');
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 RESET SESSION AUTHORIZATION;
 
 --- inserts rows owned by different users
 INSERT INTO rls_tbl VALUES
-  (3,'baz','ivm_user'),
+  (3,'baz','regress_ivm_user'),
   (4,'qux','postgres');
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 
 --- combination of diffent kinds of commands
 WITH
- i AS (INSERT INTO rls_tbl VALUES(5,'quux','postgres'), (6,'corge','ivm_user')),
+ i AS (INSERT INTO rls_tbl VALUES(5,'quux','postgres'), (6,'corge','regress_ivm_user')),
  u AS (UPDATE rls_tbl SET owner = 'postgres' WHERE id = 1),
- u2 AS (UPDATE rls_tbl SET owner = 'ivm_user' WHERE id = 2)
+ u2 AS (UPDATE rls_tbl SET owner = 'regress_ivm_user' WHERE id = 2)
 SELECT;
 SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 
 ---
-SET SESSION AUTHORIZATION ivm_user;
+SET SESSION AUTHORIZATION regress_ivm_user;
 SELECT pgivm.create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 RESET SESSION AUTHORIZATION;
 
@@ -656,8 +656,8 @@ SELECT * FROM ivm_rls2 ORDER BY 1,2,3;
 DROP TABLE rls_tbl CASCADE;
 DROP TABLE num_tbl CASCADE;
 
-DROP USER ivm_user;
-DROP USER ivm_admin;
+DROP USER regress_ivm_user;
+DROP USER regress_ivm_admin;
 
 -- automatic index creation
 BEGIN;
