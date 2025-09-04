@@ -1,6 +1,6 @@
 # How to build RPM:
 #
-#   rpmbuild -bb pg_ivm.spec --define "pgmajorversion 17" --define "pginstdir /usr/pgsql-17"
+#   rpmbuild -bb pg_ivm.spec --define "pgmajorversion 18" --define "pginstdir /usr/pgsql-18"
 
 %global sname pg_ivm
 
@@ -8,11 +8,11 @@
 %global llvm  1
 %endif
 
-Summary:	PostgreSQL-based distributed RDBMS
+Summary:	Incremental View Maintenance (IVM) feature for PostgreSQL.
 Name:		%{sname}_%{pgmajorversion}
-Version:	1.11
+Version:	1.12
 Release:	1%{dist}
-License:    BSD
+License:    PostgreSQL
 Vendor:     IVM Development Group
 URL:		https://github.com/sraoss/%{sname}
 Source0:	https://github.com/sraoss/%{sname}/archive/v%{version}.tar.gz
@@ -55,8 +55,10 @@ PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot
 %endif
 
 %changelog
+* Mon Sep 4 2025 - Yugo Nagata <nagata@sraoss.co.jp> 1.12-1
+- Update to 1.12
 * Mon May 25 2025 - Yugo Nagata <nagata@sraoss.co.jp> 1.11-1
-- Update to 1.10
+- Update to 1.11
 * Tue Mar 11 2025 - Yugo Nagata <nagata@sraoss.co.jp> 1.10-1
 - Update to 1.10
 * Fri Jul 31 2024 - Yugo Nagata <nagata@sraoss.co.jp> 1.9-1
