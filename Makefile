@@ -21,7 +21,7 @@ DATA = pg_ivm--1.0.sql \
        pg_ivm--1.10.sql \
        pg_ivm--1.10--1.11.sql pg_ivm--1.11--1.12.sql
 
-REGRESS = pg_ivm create_immv refresh_immv
+REGRESS = pg_ivm create_immv refresh_immv preload_libraries_warning
 
 PGVER = $(shell $(PG_CONFIG) --version | sed "s/^[^ ]* \([0-9]*\).*$$/\1/" 2>/dev/null)
 
