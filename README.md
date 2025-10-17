@@ -343,7 +343,7 @@ After restoring data from a `pg_dump` backup or upgrading `PostgreSQL` using `pg
 
 ## Supported View Definitions and Restriction
 
-Currently, IMMV's view definition can contain inner joins, DISTINCT clause, some built-in aggregate functions, simple sub-queries in `FROM` clause, EXISTS sub-queries, and simple CTE (`WITH` query). Inner joins including self-join are supported, but outer joins are not supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
+Currently, IMMV's view definition can contain inner and outer joins, DISTINCT clause, some built-in aggregate functions, simple sub-queries in `FROM` clause, EXISTS sub-queries, and simple CTE (`WITH` query). Inner joins including self-join are supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
 
 The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
 
@@ -372,9 +372,27 @@ If we have a `GROUP BY` clause, expressions specified in `GROUP BY` must appear 
 
 Targetlist cannot contain expressions which contain an aggregate in it.
 
+### Outer Joins
+
+Outer joins are supported with the following restrictions.
+
+#### Restrictions on Outer Joins
+
+Only simple equijoin is supported. The join condition must be a single equality comparison between columns of two base tables.
+
+All attributes used in join conditions must be included in the target list. These attributes are used as scan keys for searching tuples in the `IMMV`, so indexes on them are required for efficient IVM.
+
+The target list cannot contain non-strict functions that may return a non-NULL results for NULL inputs. For example, `CASE` expressions cannot be used.
+
+`WHERE` clauses cannot contain non-null-rejecting predicates that can return true for NULL inputs.  For example, `IS NULL` cannot be used.
+
+Aggregate functions cannot be used with outer joins.
+
+Subqueries cannot be used with outer joins.
+
 ### Subqueries
 
-Simple subqueries in `FROM` clause and EXISTS subqueries in 'WHERE' clause are supported.
+Simple subqueries in `FROM` clause and `EXISTS` subqueries in 'WHERE' clause are supported.
 
 #### Restrictions on Subqueries
 

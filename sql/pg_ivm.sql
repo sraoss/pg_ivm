@@ -516,10 +516,6 @@ SELECT * FROM mv_mytype;
 
 ROLLBACK;
 
--- outer join is not supported
-SELECT pgivm.create_immv('mv(a,b)',
-    'SELECT a.i, b.i FROM mv_base_a a LEFT JOIN mv_base_b b ON a.i=b.i');
-
 -- contain system column
 SELECT pgivm.create_immv('mv_ivm01', 'SELECT i,j,xmin FROM mv_base_a');
 SELECT pgivm.create_immv('mv_ivm02', 'SELECT i,j FROM mv_base_a WHERE xmin = ''610''');

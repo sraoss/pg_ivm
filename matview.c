@@ -18,6 +18,7 @@
 #include "access/xact.h"
 #include "catalog/pg_depend.h"
 #include "catalog/heap.h"
+#include "catalog/pg_collation_d.h"
 #include "catalog/pg_trigger.h"
 #include "commands/cluster.h"
 #include "commands/defrem.h"
@@ -31,11 +32,15 @@
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
+#include "optimizer/prep.h"
 #include "parser/analyze.h"
 #include "parser/parse_clause.h"
+#include "parser/parse_coerce.h"
+#include "parser/parse_collate.h"
 #include "parser/parse_func.h"
 #include "parser/parse_relation.h"
 #include "parser/parser.h"
+#include "parser/parsetree.h"
 #include "pgstat.h"
 #include "rewrite/rewriteHandler.h"
 #include "rewrite/rewriteManip.h"
@@ -155,6 +160,34 @@ typedef enum
 #define NEW_DELTA_ENRNAME "new_delta"
 #define OLD_DELTA_ENRNAME "old_delta"
 
+/*
+ * Term
+ *
+ * An outer join query can be transformed into a normalized form that
+ * consists of one or more terms. The normalized form is a bag union of
+ * terms, and each term is an inner join of some base tables, which is
+ * usually null-extended due to one or more anti-joins with other base
+ * tables.
+ *
+ * relids:		base tables inner-joined in this term
+ * anti_relids:	list of Relids, each representing base tables that are
+ * 				anti-joined in each anti-join in this term
+ */
+typedef struct
+{
+	Relids	relids;
+	List	*anti_relids;
+} Term;
+
+/*
+ * OuterJoinRelInfo: contains a list of resnames in the view target list
+ * for key attributes of the base tables participating in the outer join.
+ */
+typedef struct OuterJoinRelInfo {
+	int	rtindex;
+	List *key_attrs;
+} OuterJoinRelInfo;
+
 static int	immv_maintenance_depth = 0;
 
 static uint64 refresh_immv_datafill(DestReceiver *dest, Query *query,
@@ -177,6 +210,14 @@ static RangeTblEntry *union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, Lis
 		   const char *prefix, QueryEnvironment *queryEnv);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
+static List *get_normalized_form(Query *query, Node *jtnode, Relids outer_join_rels,
+								 List **outerjoin_quals);
+static List *multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
+							JoinType jointype, Relids outer_join_rels);
+static Query *rewrite_query_for_outerjoin(Query *query, int index, List *terms);
+static bool rewrite_jointype(Query *query, Node *node, int index, Relids *relids,
+							 List **reduced_outerjoins, List **unreduced_relids);
+
 static void calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 			DestReceiver *dest_old, DestReceiver *dest_new,
 			TupleDesc *tupdesc_old, TupleDesc *tupdesc_new,
@@ -184,9 +225,10 @@ static void calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 static Query *rewrite_query_for_postupdate_state(Query *query, MV_TriggerTable *table, List *rte_path);
 static ListCell *getRteListCell(Query *query, List *rte_path);
 
-static void apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *new_tuplestores,
-			TupleDesc tupdesc_old, TupleDesc tupdesc_new,
-			Query *query, bool use_count, char *count_colname);
+static void apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores,Tuplestorestate *new_tuplestores,
+						TupleDesc tupdesc_old, TupleDesc tupdesc_new,
+						Query *query, bool use_count, char *count_colname,
+						List *terms, List *rte_path, List *outerjoin_relinfo);
 static void append_set_clause_for_count(const char *resname, StringInfo buf_old,
 							StringInfo buf_new,StringInfo aggs_list);
 static void append_set_clause_for_sum(const char *resname, StringInfo buf_old,
@@ -221,6 +263,12 @@ static void recalc_and_set_values(SPITupleTable *tuptable_recalc, int64 num_tupl
 					  List *namelist, List *keys, Relation matviewRel);
 static SPIPlanPtr get_plan_for_recalc(Relation matviewRel, List *namelist, List *keys, Oid *keyTypes);
 static SPIPlanPtr get_plan_for_set_values(Relation matviewRel, List *namelist, Oid *valTypes);
+static void insert_dangling_tuples(List *terms, Query *query,
+					   Relation matviewRel, const char *deltaname_old,
+					   bool use_count, int index, List *outerjoin_relinfo);
+static void delete_dangling_tuples(List *terms, Query *query,
+					   Relation matviewRel, const char *deltaname_new, int index,
+					   List *outerjoin_relinfo);
 static void generate_equal(StringInfo querybuf, Oid opttype,
 			   const char *leftop, const char *rightop);
 
@@ -857,6 +905,7 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 	return PointerGetDatum(NULL);
 }
 
+
 /*
  * IVM_immediate_maintenance
  *
@@ -889,6 +938,12 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	MV_TriggerHashEntry *entry;
 	MV_TriggerTable		*table;
 	bool	found;
+
+	bool	hasOuterJoins = false;
+	Relids	outer_join_rels = NULL;		/* relids of outer-join relations */
+	List   *terms = NIL;				/* terms in a normalized form of outer-join query */
+	List   *outerjoin_quals = NIL;		/* quals in outer-join conditions */
+	List   *outerjoin_relinfo = NIL;	/* key attribute information of base tables in the outer join */
 
 	ParseState		 *pstate;
 	QueryEnvironment *queryEnv = create_queryEnv();
@@ -1035,19 +1090,114 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	/* get view query*/
 	query = get_immv_query(matviewRel);
 
+	/* join tree analysis for outer join */
+	i = 1;
+	foreach(lc, query->rtable)
+	{
+		RangeTblEntry *rte = lfirst_node(RangeTblEntry, lc);
+
+		if (rte->rtekind == RTE_JOIN && IS_OUTER_JOIN(rte->jointype))
+		{
+			hasOuterJoins = true;
+			outer_join_rels = bms_add_member(outer_join_rels, i);
+		}
+		i++;
+	}
+
+	if (hasOuterJoins)
+	{
+		Relids all_qual_vars;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+		PlannerInfo root;
+#endif
+
+		terms = get_normalized_form(query, (Node *) query->jointree,
+									outer_join_rels, &outerjoin_quals);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+		outerjoin_quals =
+			(List *) flatten_join_alias_vars(NULL, query,
+											 (Node *) outerjoin_quals);
+#else
+		outerjoin_quals =
+			(List *) flatten_join_alias_vars(query,
+											 (Node *) outerjoin_quals);
+#endif
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+		all_qual_vars = pull_varnos(&root, (Node *) outerjoin_quals);
+#else
+		all_qual_vars = pull_varnos((Node *) outerjoin_quals);
+#endif
+		all_qual_vars = bms_del_members(all_qual_vars, outer_join_rels);
+
+		/* Collect key resnames for each outer-joined table */
+		i = -1;
+		while ((i = bms_next_member(all_qual_vars, i)) >= 0)
+		{
+			OuterJoinRelInfo *info;
+
+			found = false;
+			foreach(lc, outerjoin_relinfo)
+			{
+				info = (OuterJoinRelInfo *) lfirst(lc);
+				if (info->rtindex == i)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+			{
+				info = palloc(sizeof(OuterJoinRelInfo));
+				info->rtindex = i;
+				info->key_attrs = NIL;
+				outerjoin_relinfo = lappend(outerjoin_relinfo, info);
+			}
+
+			foreach(lc, query->targetList)
+			{
+				TargetEntry *tle = (TargetEntry *) lfirst(lc);
+				Form_pg_attribute attr = TupleDescAttr(matviewRel->rd_att, tle->resno - 1);
+				Var *var;
+
+				if (tle->resjunk)
+					continue;
+
+				if (!IsA(tle->expr, Var))
+					continue;
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+				var = (Var *) flatten_join_alias_vars(NULL, query, (Node *) tle->expr);
+#else
+				var = (Var *) flatten_join_alias_vars(query, (Node *) tle->expr);
+#endif
+
+				if (var->varno == i)
+					info->key_attrs = lappend(info->key_attrs, attr);
+			}
+		}
+
+		bms_free(all_qual_vars);
+	}
+
 	/*
 	 * When a base table is truncated, the view content will be empty if the
-	 * view definition query does not contain an aggregate without a GROUP clause.
-	 * Therefore, such views can be truncated.
+	 * view definition query does not contain an outer join or an aggregate
+	 * without a GROUP clause. Therefore, such views can be truncated.
 	 *
 	 * Aggregate views without a GROUP clause always have one row. Therefore,
 	 * if a base table is truncated, the view will not be empty and will contain
 	 * a row with NULL value (or 0 for count()). So, in this case, we refresh the
 	 * view instead of truncating it.
+	 *
+	 * If you have an outer join, truncating a base table will not empty the
+	 * join result. Therefore, refresh the view in this case as well.
 	 */
 	if (TRIGGER_FIRED_BY_TRUNCATE(trigdata->tg_event))
 	{
-		if (!(query->hasAggs && query->groupClause == NIL))
+		if (!hasOuterJoins && !(query->hasAggs && query->groupClause == NIL))
 		{
 			OpenImmvIncrementalMaintenance();
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
@@ -1196,6 +1346,8 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 			RangeTblEntry  *rte;
 			TupleDesc		tupdesc_old;
 			TupleDesc		tupdesc_new;
+			Query	*query_for_delta;
+			bool	in_exists = false;
 			bool	use_count = false;
 			char   *count_colname = NULL;
 
@@ -1215,6 +1367,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 						if (count_colname)
 						{
 							use_count = true;
+							in_exists = true;
 						}
 					}
 				}
@@ -1226,8 +1379,23 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 				use_count = true;
 			}
 
+			/* For outer join query, we need additional rewrites. */
+			if (!in_exists && hasOuterJoins)
+			{
+				int index;
+
+				/* We do not assume nested queries */
+				Assert(list_length(rte_path) == 1);
+
+				index = linitial_int(rte_path);
+
+				query_for_delta = rewrite_query_for_outerjoin(rewritten, index, terms);
+			}
+			else
+				query_for_delta = rewritten;
+
 			/* calculate delta tables */
-			calc_delta(table, rte_path, rewritten, dest_old, dest_new,
+			calc_delta(table, rte_path, query_for_delta, dest_old, dest_new,
 					   &tupdesc_old, &tupdesc_new, queryEnv);
 
 			/* Set the table in the query to post-update state */
@@ -1238,7 +1406,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 				/* apply the delta tables to the materialized view */
 				apply_delta(matviewOid, old_tuplestore, new_tuplestore,
 							tupdesc_old, tupdesc_new, query, use_count,
-							count_colname);
+							count_colname, terms, rte_path, outerjoin_relinfo);
 			}
 			PG_CATCH();
 			{
@@ -1266,6 +1434,31 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	{
 		dest_new->rDestroy(dest_new);
 		tuplestore_end(new_tuplestore);
+	}
+
+	/* Clean up resources for outer join maintenance */
+	if (hasOuterJoins)
+	{
+		bms_free(outer_join_rels);
+
+		foreach(lc, terms)
+		{
+			Term *term = (Term *) lfirst(lc);
+
+			bms_free(term->relids);
+			list_free(term->anti_relids);
+			pfree(term);
+		}
+
+		foreach(lc, outerjoin_relinfo)
+		{
+			OuterJoinRelInfo *info = (OuterJoinRelInfo *) lfirst(lc);
+			pfree(info);
+		}
+
+		list_free(terms);
+		list_free(outerjoin_quals);
+		list_free(outerjoin_relinfo);
 	}
 
 	/* Pop the original snapshot. */
@@ -1533,18 +1726,26 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	 */
 	initStringInfo(&str);
 	appendStringInfo(&str,
-		"SELECT %s FROM %s t"
+		"SELECT %s, ctid::text FROM %s t"
 		" WHERE pgivm.ivm_visible_in_prestate(t.tableoid, t.ctid, %d::pg_catalog.oid)",
 			subquery_tl, relname, matviewid);
 
 	/*
 	 * Append deleted rows contained in old transition tables.
+	 *
+	 * Add a pseudo ctid to ENR using row_number(), which is required for
+	 * calculating the number of dangling tuples to be inserted into
+	 * the outer join view.
 	 */
 	for (i = 0; i < list_length(table->old_tuplestores); i++)
 	{
 		appendStringInfo(&str, " UNION ALL ");
-		appendStringInfo(&str," SELECT %s FROM %s",
-			subquery_tl, make_delta_enr_name("old", table->table_id, i));
+		appendStringInfo(&str," SELECT %s, "
+			" ((row_number() over())::text || '_' || '%d' || '_' || '%d') AS ctid"
+			" FROM %s",
+			subquery_tl,
+			table->table_id, i,
+			make_delta_enr_name("old", table->table_id, i));
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1560,6 +1761,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 
 	rte->rtekind = RTE_SUBQUERY;
 	rte->subquery = subquery;
+	rte->eref->colnames = lappend(rte->eref->colnames, makeString(pstrdup("ctid")));
 	rte->security_barrier = false;
 
 	/* Clear fields that should not be set in a subquery RTE */
@@ -1670,9 +1872,17 @@ union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
 		if (i > 0)
 			appendStringInfo(&str, " UNION ALL ");
 
+		/*
+		 * Add a pseudo ctid to ENR using row_number(), which is required for
+		 * calculating the number of dangling tuples to be inserted into
+		 * the outer join view.
+		 */
 		appendStringInfo(&str,
-			" SELECT %s FROM %s",
+			" SELECT %s,  "
+			" ((row_number() over())::text || '_' || '%d' || '_' || '%d') AS ctid"
+			" FROM %s",
 			make_subquery_targetlist_from_table(table),
+			table->table_id, i,
 			make_delta_enr_name(prefix, table->table_id, i));
 	}
 
@@ -1931,6 +2141,609 @@ rewrite_query_for_exists_subquery(Query *query)
 }
 
 /*
+ * get_normalized_form
+ *
+ * Transform query's jointree to the normalized form which consists of one or
+ * more terms. The normalized form is a bag union of terms, and each term is
+ * an inner join of some base tables, which is usually null-extended due to an
+ * antijoin with other base tables.
+ *
+ * outer_join_rels is Relids of outer-join relations
+ * The quals in the outer-join conditions will be stored into outerjoin_quals
+ */
+static List*
+get_normalized_form(Query *query, Node *jtnode, Relids outer_join_rels,
+					List **outerjoin_quals)
+{
+
+	if (jtnode == NULL)
+		return NULL;
+
+	if (IsA(jtnode, RangeTblRef))
+	{
+		int			varno = ((RangeTblRef *) jtnode)->rtindex;
+		Term *term;
+
+		/*
+		 * Create and initialize a term for a single table. Currently,
+		 * we assume this is a normal table.
+		 */
+		Assert(rt_fetch(varno, query->rtable)->relkind == RELKIND_RELATION);
+
+		term = (Term*) palloc(sizeof(Term));
+		term->relids = bms_make_singleton(varno);
+		term->anti_relids = NIL;
+
+		return  list_make1(term);
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		List *terms = NIL;
+		FromExpr   *f = (FromExpr *) jtnode;
+		ListCell   *l;
+		bool	is_first = true;
+
+		/*
+		 * Create a term list using the terms in FROM list. The qual of
+		 * WHERE clause is specified only the first step.
+		 */
+		foreach(l, f->fromlist)
+		{
+			List *t = get_normalized_form(query, lfirst(l), outer_join_rels,
+										  outerjoin_quals);
+			terms = multiply_terms(query, terms, t,
+								   (is_first ? f->quals : NULL),
+								   JOIN_INNER, outer_join_rels);
+			is_first = false;
+		}
+		return terms;
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+		List	   *lterms = get_normalized_form(query, j->larg,
+												 outer_join_rels,
+												 outerjoin_quals),
+				   *rterms = get_normalized_form(query, j->rarg,
+				   								 outer_join_rels,
+												 outerjoin_quals);
+		List *terms = NIL;
+
+		/* Create a term list from the two term lists and the join qual */
+		terms = multiply_terms(query, lterms, rterms, j->quals,
+							   j->jointype, outer_join_rels);
+
+		if (j->jointype == JOIN_LEFT || j->jointype == JOIN_RIGHT ||
+			j->jointype == JOIN_FULL)
+			*outerjoin_quals = lappend(*outerjoin_quals, j->quals);
+
+		return terms;
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(jtnode));
+}
+
+/*
+ * multiply_terms
+ *
+ * Create new a term list by multiplying two term lists. If qual is
+ * given, remove terms which are filtered by this qual and add this
+ * qual to new terms. If one of the two term list is NIL, we return
+ * the other after filtering by the qual.
+ *
+ * jointype is expected be JOIN_LEFT, JOIN_RIGHT, JOIN_FULL, or
+ * JOIN_INNER. When mutiplying relations direcly under FROM clause,
+ * JONI_INNER should be specified.
+ *
+ * outer_join_rels is Relids of outer-join relations
+ */
+static List*
+multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
+			   JoinType jointype, Relids outer_join_rels)
+{
+	List		*result = NIL;
+	ListCell	*l1, *l2;
+	Relids		qual_relids;
+	Relids		qual_relids_l = NULL, qual_relids_r = NULL;
+	Relids		anti_relids_l = NULL, anti_relids_r = NULL;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+	PlannerInfo root;
+#endif
+
+	Assert(jointype == JOIN_LEFT || jointype == JOIN_RIGHT ||
+		   jointype == JOIN_FULL || jointype == JOIN_INNER);
+
+	if (qual)
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+		qual = flatten_join_alias_vars(NULL, query, qual);
+#else
+		qual = flatten_join_alias_vars(query, qual);
+#endif
+
+	/* all relids included in quals */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+	qual_relids = pull_varnos(&root, qual);
+#else
+	qual_relids = pull_varnos(qual);
+#endif
+	qual_relids = bms_del_members(qual_relids, outer_join_rels);
+
+	/* If either is NIL, return the other after filtering by qual. */
+	if (terms1 == NIL || terms2 == NIL)
+	{
+		/* This must be the first term in FROM clause */
+		Assert(jointype == JOIN_INNER);
+
+		result = (terms1 == NIL ? terms2 : terms1);
+		if (!qual)
+			return result;
+
+		foreach (l1, result)
+		{
+			Term *term = (Term*) lfirst(l1);
+
+			/*
+			 * If the relids in the qual are not included, this term can not exist
+			 * because this qual references NULL values.
+			 * XXX: we assume that the qual is null-rejecting.
+			 */
+			if (!bms_is_subset(qual_relids, term->relids))
+			{
+				result = foreach_delete_current(result, l1);
+				continue;
+			}
+		}
+
+		bms_free(qual_relids);
+
+		return result;
+	}
+
+	/*
+	 * join of two terms
+	 *
+	 * We assume terms1 is the left hand side, and terms2 is the right hand
+	 * side.
+	 */
+
+	/*
+	 * Get the RHS relids that participate in the outer join by subtracting
+	 * LHS relids.
+	 */
+	qual_relids_r = bms_copy(qual_relids);
+	foreach (l1, terms1)
+	{
+		Term *lterm = (Term*) lfirst(l1);
+		qual_relids_r = bms_del_members(qual_relids_r, lterm->relids);
+	}
+
+	/*
+	 * Get the LHS relids that participate in the outer join by subtracting
+	 * RHS relids.
+	 */
+	qual_relids_l = bms_copy(qual_relids);
+	foreach (l1, terms2)
+	{
+		Term *rterm = (Term*) lfirst(l1);
+		qual_relids_l = bms_del_members(qual_relids_l, rterm->relids);
+	}
+
+	/* Find relids of tables anti-joined with term on the LHS */
+	if (jointype == JOIN_LEFT || jointype == JOIN_FULL)
+	{
+		foreach (l1, terms2)
+		{
+			/*
+			 * If this RHS term is participating in the outer join and the size
+			 * of its inner-joined relids is minimal among such terms, add it to
+			 * the list of anti-joined relids for the LHS terms.  Other terms with
+			 * larger inner-joined relids are eliminated under the condition that
+			 * the join qual is null-rejecting.  For example, in the following term:
+			 *
+			 *  T anti-join [(R1 join R2) + (R1 anti-join R2)]
+			 *
+			 * if the first anti-join involves only R1, the term can be
+			 * transformed into:
+			 *
+			 *  T anti-join R1
+			 *
+			 * since all tuples in R1 are preserved regardless of R2.
+			 * Otherwise, if the first anti-join involves either only R2
+			 * or both R1 and R2, the term is transformed into:
+			 *
+			 *  T anti-join (R1 join R2)
+			 *
+			 * The resultant anti_relids_r represents the relids of
+			 * tables that could be anti-joined with every term
+			 * on the LHS.
+			 */
+			Term *rterm = (Term*) lfirst(l1);
+			if (bms_is_subset(qual_relids_r, rterm->relids))
+			{
+				if (!anti_relids_r)
+					anti_relids_r = bms_copy(rterm->relids);
+				else
+					anti_relids_r = bms_int_members(anti_relids_r, rterm->relids);
+			}
+		}
+	}
+
+	/* Find relids of tables anti-joined with term on the RHS */
+	if (jointype == JOIN_RIGHT|| jointype == JOIN_FULL)
+	{
+		foreach (l1, terms1)
+		{
+			/*
+			 * Same, except for the right and left sides.  See the comment above.
+			 *
+			 * The resultant anti_relids_l represents the relids of
+			 * tables that could be anti-joined with every term
+			 * on the RHS.
+			 */
+			Term *lterm = (Term*) lfirst(l1);
+			if (bms_is_subset(qual_relids_l, lterm->relids))
+			{
+				if (!anti_relids_l)
+					anti_relids_l = bms_copy(lterm->relids);
+				else
+					anti_relids_l = bms_int_members(anti_relids_l, lterm->relids);
+			}
+		}
+	}
+
+	foreach (l1, terms1)
+	{
+		Term *lterm = (Term*) lfirst(l1);
+		foreach (l2, terms2)
+		{
+			Term *rterm = (Term*) lfirst(l2);
+
+			/*
+			 * If both the LHS term and the RHS term are participating in the outer join,
+			 * the new term fomred by joining them will survive under the condition that
+			 * the qual is null-rejecting.  Otherwise, the new term cannot exist because
+			 * the qual references NULL values.
+			 */
+			if (bms_is_subset(qual_relids_l, lterm->relids) &&
+				bms_is_subset(qual_relids_r, rterm->relids))
+			{
+				Term *newterm = (Term*) palloc(sizeof(Term));
+
+				newterm->relids = bms_union(lterm->relids, rterm->relids);
+				newterm->anti_relids = list_concat_copy(lterm->anti_relids,
+														rterm->anti_relids);
+
+				result = lappend(result, newterm);
+			}
+
+			/*
+			 * If this RHS term is participating in the outer join, add the relids of
+			 * anti-joined tables from the LHS to this term's anti-joined table list.
+			 * Note that these relids include only relations participating in the join.
+			 *
+			 * This is done only in the final iteration over the LHS terms, since it
+			 * needs to be performed just once for each RHS term.
+			 *
+			 * The modified terms are later added to the result as terms representing
+			 * dangling tuples formed by this outer join.
+			 */
+			if (!lnext(terms1, l1) &&
+				(jointype == JOIN_RIGHT || jointype == JOIN_FULL))
+			{
+				if (bms_is_subset(qual_relids_r, rterm->relids))
+					rterm->anti_relids = lappend(rterm->anti_relids, bms_copy(anti_relids_l));
+			}
+		}
+
+		/*
+		 * If this LHS term is participating in the outer join, add the relids of
+		 * anti-joined tables from the RHS to this term, similar to the process
+		 * above but with LHS and RHS swapped.
+		 *
+		 * This is performed for each LHS term.
+		 */
+		if (jointype == JOIN_LEFT || jointype == JOIN_FULL)
+		{
+			if (bms_is_subset(qual_relids_l, lterm->relids))
+				lterm->anti_relids = lappend(lterm->anti_relids, bms_copy(anti_relids_r));
+		}
+	}
+
+	/* In outer-join cases, add terms for dangling tuples */
+	switch (jointype)
+	{
+		case JOIN_LEFT:
+			result = list_concat(result, terms1);
+			break;
+		case JOIN_RIGHT:
+			result = list_concat(result, terms2);
+			break;
+		case JOIN_FULL:
+			result = list_concat(result, terms1);
+			result = list_concat(result, terms2);
+			break;
+		case JOIN_INNER:
+			break;
+		default:
+			elog(ERROR, "unexpected join type: %d", jointype);
+	}
+
+	bms_free(qual_relids);
+	bms_free(qual_relids_l);
+	bms_free(qual_relids_r);
+	if (anti_relids_l)
+		bms_free(anti_relids_l);
+	if (anti_relids_r)
+		bms_free(anti_relids_r);
+
+	return result;
+}
+
+/*
+ * rewrite_query_for_outerjoin
+ *
+ * Rewrite the query to calculate the primary delta for an outer join view.
+ *
+ * index: the rteindex of the modified table
+ * terms: the list of terms representing the normalized form of the outer join
+ */
+static Query*
+rewrite_query_for_outerjoin(Query *query, int index, List *terms)
+{
+	Query  *result = copyObject(query);
+	int		varno;
+	Node   *node;
+	TargetEntry *tle;
+	List		*args = NIL;
+	FuncCall	*fn;
+	ParseState	*pstate = make_parsestate(NULL);
+	Relids	allrelids = NULL;
+	ListCell *lc;
+	List	*reduced_outerjoins = NIL;
+	List	*unreduced_relids = NIL;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	ListCell *lc1, *lc2;
+#endif
+
+	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+	fn = makeFuncCall(list_make1(makeString("count")), NIL,
+								 COERCE_EXPLICIT_CALL, -1);
+#else
+	fn = makeFuncCall(list_make1(makeString("count")), NIL, -1);
+#endif
+	fn->agg_distinct = true;
+
+	/*
+	 * Reduce the outer join type for calculating the primary delta.
+	 */
+	if (!rewrite_jointype(result, (Node *) result->jointree, index, &allrelids,
+						  &reduced_outerjoins, &unreduced_relids))
+		elog(ERROR, "modified range table %d not found", index);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	/*
+	 * Remove nullingrel markers that reference removed outer joins.
+	 * For a partially reduced FULL join, relids on the unreduced side
+	 * are stored in unreduced_relids, and the nullingrel markers for
+	 * those must be preserved.
+	 */
+	forboth(lc1, reduced_outerjoins, lc2, unreduced_relids)
+	{
+		Relids reduced = bms_make_singleton(lfirst_int(lc1));
+		Relids unreduced = (Relids) lfirst(lc2);
+		result = (Query *) remove_nulling_relids((Node *) result, reduced,
+												 unreduced);
+		bms_free(reduced);
+	}
+#endif
+
+	/*
+	 * Add meta information for the primary delta.
+	 *
+	 * ctid is required for calculating the number of dangling tuples to be
+	 * inserted into the outer join view.
+	 */
+	varno = -1;
+	while ((varno = bms_next_member(allrelids, varno)) >= 0)
+	{
+		Var *var = NULL;
+		RangeTblEntry *rte = rt_fetch(varno, result->rtable);
+
+		if (rte->rtekind == RTE_RELATION)
+		{
+			var = makeVar(varno, SelfItemPointerAttributeNumber, TIDOID, -1,
+						  InvalidOid, 0);
+		}
+		else if (rte->rtekind == RTE_SUBQUERY)
+		{
+			/*
+			 * Any subquery must be a pre-state table made by get_prestate_rte,
+			 * since currently sub-queries cannot be used with a outer join
+			 * in the view definition.
+			 */
+			foreach (lc, ((Query *) rte->subquery)->targetList)
+			{
+				tle = (TargetEntry *) lfirst(lc);
+				if (!strcmp(tle->resname, "ctid"))
+				{
+					var = makeVar(varno, tle->resno, TEXTOID, -1,
+								  DEFAULT_COLLATION_OID, 0);
+					break;
+				}
+			}
+		}
+		else
+			elog(ERROR, "unexpected rte kind");
+
+		/*
+		 * Add count(distinct ctid) to count the number of tuples from each
+		 * base table that participate in generating a tuple in the primary
+		 * delta.
+		 */
+		args = lappend(args, makeConst(INT4OID,
+								 -1,
+								 InvalidOid,
+								 sizeof(int32),
+								 Int32GetDatum(varno),
+								 false,
+								 true));
+		node = ParseFuncOrColumn(pstate, fn->funcname, list_make1(var), NULL, fn,
+								 false, -1);
+		args = lappend(args, node);
+	}
+
+	/*
+	 * Store counts for all base tables in a JSONB object.
+	 */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+	fn = makeFuncCall(list_make1(makeString("json_build_object")), NIL,
+					  COERCE_EXPLICIT_CALL, -1);
+#else
+	fn = makeFuncCall(list_make1(makeString("json_build_object")), NIL, -1);
+#endif
+	node = ParseFuncOrColumn(pstate, fn->funcname, args, NULL, fn, false, -1);
+	node = coerce_type(pstate, node, JSONOID, JSONBOID, -1, COERCION_EXPLICIT,
+					   COERCE_EXPLICIT_CAST, -1);
+	assign_expr_collations(pstate, node);
+	tle = makeTargetEntry((Expr *) node,
+							list_length(result->targetList) + 1,
+							pstrdup("__ivm_meta__"),
+							false);
+
+	result->targetList = lappend(result->targetList, tle);
+
+	return result;
+}
+
+/*
+ * rewrite_jointype
+ *
+ * Traverse the jointree in the query and reduce the strength of any outer
+ * join that includes the modified table, in order to compute the primary
+ * delta (the change in view tuples where the modified table is on the
+ * non-nullable side).  Such tuples should be inserted into the view when
+ * any tuples are inserted into the table, or deleted when tuples are deleted
+ * from it.
+ *
+ * When the modified table is on the nullable side of an outer join,
+ * changes in null-extended tuples are excluded from the primary delta,
+ * since those tuples are removed from the view on insertions and added
+ * on deletions if required.  Therefore, for computing the primary delta,
+ * the outer join can be reduced in strength; a LEFT or RIGHT join can
+ * be rewritten as an INNER join, and a FULL join as a LEFT or RIGHT join
+ * depending on which side the modified table is on.
+ *
+ * index: rtindex of the modified table.
+ *
+ * All relids in the specified node are stored into *relids.
+ * The rtindexes of reduced outer joins are stored into *reduced_outerjoins.
+ * For reduced FULL outer joins, the relids of tables on the unreduced
+ * side are stored into *unreduced_relids; for other outer joins, NULL
+ * is stored instead.
+ *
+ * Returns true if the modified table appears under the specified node.
+ */
+static bool
+rewrite_jointype(Query *query, Node *node, int index, Relids *relids,
+				 List **reduced_outerjoins, List **unreduced_relids)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, RangeTblRef))
+	{
+		int	rtindex = ((RangeTblRef *) node)->rtindex;
+		*relids = bms_add_member(*relids, rtindex);
+		if (rtindex == index)
+			return true;
+		else
+			return false;
+	}
+	else if (IsA(node, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) node;
+		ListCell   *l;
+		bool		found = false;
+
+		foreach(l, f->fromlist)
+		{
+			if (rewrite_jointype(query, lfirst(l), index, relids,
+								 reduced_outerjoins, unreduced_relids))
+				found = true;
+		}
+		return found;
+	}
+	else if (IsA(node, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) node;
+		RangeTblEntry *rte = rt_fetch(j->rtindex, query->rtable);
+		Relids		left_relids = NULL;
+		Relids		right_relids = NULL;
+
+		bool found_left = rewrite_jointype(query, j->larg, index, &left_relids,
+										   reduced_outerjoins, unreduced_relids);
+		bool found_right = rewrite_jointype(query, j->rarg, index, &right_relids,
+											reduced_outerjoins, unreduced_relids);
+
+		/*
+		 * When the modified table is on the LHS, a FULL or RIGHT join can be
+		 * reduced to a LEFT or INNER join, respectively. However, if it is
+		 * a FULL join, the tables on the RHS remain nullable due to the join,
+		 * so save their reilds to remove only the correct nullingrel
+		 * markers later.
+		 */
+		if (found_left)
+		{
+			if (j->jointype == JOIN_FULL || j->jointype == JOIN_RIGHT)
+			{
+				Relids except = NULL;
+				if (j->jointype == JOIN_FULL)
+				{
+					j->jointype = rte->jointype = JOIN_LEFT;
+					except = right_relids;
+				}
+				else
+					j->jointype = rte->jointype = JOIN_INNER;
+
+				*reduced_outerjoins = lappend_int(*reduced_outerjoins, j->rtindex);
+				*unreduced_relids = lappend(*unreduced_relids, except);
+			}
+		}
+
+		/*
+		 * When the modified table is on the RHS, a FULL or LEFT join can be
+		 * reduced to a LEFT or RIGHT join, respectively. If it is a FULL join,
+		 * save the relids of tables on the LHS for a similar reason as above.
+		 */
+		if (found_right)
+		{
+			if (j->jointype == JOIN_FULL || j->jointype == JOIN_LEFT)
+			{
+				Relids except = NULL;
+				if (j->jointype == JOIN_FULL)
+				{
+					j->jointype = rte->jointype = JOIN_RIGHT;
+					except = left_relids;
+				}
+				else if (j->jointype == JOIN_LEFT)
+					j->jointype = rte->jointype = JOIN_INNER;
+
+				*reduced_outerjoins = lappend_int(*reduced_outerjoins, j->rtindex);
+				*unreduced_relids = lappend(*unreduced_relids, except);
+			}
+		}
+		*relids = bms_union(left_relids, right_relids);
+
+		return found_left || found_right;
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(node));
+}
+
+/*
  * calc_delta
  *
  * Calculate view deltas generated under the modification of a table specified
@@ -2015,13 +2828,33 @@ getRteListCell(Query *query, List *rte_path)
 /*
  * apply_delta
  *
- * Apply deltas to the materialized view. In outer join cases, this requires
- * the view maintenance graph.
+ * Apply deltas to the materialized view.
+ *
+ * The old and new deltas and their TupleDesc should be specified by
+ * old_suplestores, new_tuplestores, tupdesc_old, and tupdesc_new,
+ * respectively.
+ *
+ * When counting is required (e.g., using aggregates, DISTINCT, or EXISTS),
+ * use_count should be true, and count_colname should be the column name
+ * storing the count.
+ *
+ * In outer-join cases:
+ * - The list of terms in the normalized form should be specified in *terms.
+ * - The modified table should be specified in *rte_path.
+ * - The list of OuterJoinRel containing key resname information should be
+ *   spedified in *outerjoin_relinfo.
+ *
+ * The delta passed in old_suplestores or new_tuplestores must be the primary
+ * delta (the change in view tuples where the modified table is on the
+ * non-nullable side). Additional delta (the secondary delta) for dangling
+ * tuples in outer joins is applied in insert_dangling_tuples() or
+ * delete_dangling_tuples().
  */
 static void
 apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *new_tuplestores,
 			TupleDesc tupdesc_old, TupleDesc tupdesc_new,
-			Query *query, bool use_count, char *count_colname)
+			Query *query, bool use_count, char *count_colname,
+			List *terms, List *rte_path, List *outerjoin_relinfo)
 {
 	StringInfoData querybuf;
 	StringInfoData target_list_buf;
@@ -2188,6 +3021,18 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 		if (minmax_list && tuptable_recalc)
 			recalc_and_set_values(tuptable_recalc, num_recalc, minmax_list, keys, matviewRel);
 
+		/*
+		 * Insert dangling tuples generated by the deletion.
+		 */
+		if (terms && !query->hasAggs)
+		{
+			int index;
+			Assert(list_length(rte_path) == 1);
+			index = linitial_int(rte_path);
+
+			insert_dangling_tuples(terms, query, matviewRel, OLD_DELTA_ENRNAME,
+								   use_count, index, outerjoin_relinfo);
+		}
 	}
 	/* For tuple insertion */
 	if (new_tuplestores && tuplestore_tuple_count(new_tuplestores) > 0)
@@ -2214,6 +3059,19 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 								query->distinctClause != NULL);
 		else
 			apply_new_delta(matviewname, NEW_DELTA_ENRNAME, &target_list_buf);
+
+		/*
+		 * Delete dangling tuples removed by the insersion.
+		 */
+		if (terms && !query->hasAggs)
+		{
+			int index;
+			Assert(list_length(rte_path) == 1);
+			index = linitial_int(rte_path);
+
+			delete_dangling_tuples(terms, query, matviewRel, NEW_DELTA_ENRNAME,
+								   index, outerjoin_relinfo);
+		}
 	}
 
 	/* We're done maintaining the materialized view. */
@@ -3163,6 +4021,452 @@ get_plan_for_set_values(Relation matviewRel, List *namelist, Oid *valTypes)
 	}
 
 	return plan;
+}
+
+/*
+ * insert_dangling_tuples
+ *
+ * Insert dangling tuples generated as a result of tuple deletions
+ * on a base table of the materialized view that has an outer join.
+ *
+ * The insertion is performed per term in the normalized form of the
+ * outer join query. Each term is an inner join of some base tables,
+ * which is usually null-extended due to one or more anti-joins with
+ * other base tables. Dangling tuples in a term can be inserted into
+ * the view when the modified table is among the anti-joined tables.
+ *
+ * When a tuple is deleted from a table anti-joined in a term,
+ * some tuples that are the product of joining this tuple and tuples
+ * in other tables joined in this term are deleted from the view.
+ * As a result, if there is no more tuples that satisfy the join
+ * qual between the inner-join and anti-join parts in this term,
+ * dangling tuples generated by null-extending the inner-join part
+ * must be inserted into the view.
+ *
+ * The delta contained in dataname_old must be the primary delta, which
+ * includes only the changes in view tuples where the modified table is
+ * on the non-nullable side. It contains tuples deleted from the view
+ * as a result of the deletions on the table, and the contents are used
+ * to generate dangling tuples to be inserted for each term.
+ *
+ * terms: the normalized form of the outer join query
+ * index: the rtindex of the modified table
+ * outerjoin_relinfo: he list of OuterJoinRel containing key resname information
+ */
+static void
+insert_dangling_tuples(List *terms, Query *query,
+					   Relation matviewRel, const char *deltaname_old,
+					   bool use_count, int index, List *outerjoin_relinfo)
+{
+	StringInfoData querybuf;
+	char	   *matviewname;
+	ListCell   *lc;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+	Relids relids_with_outer = get_relids_in_jointree((Node *) query->jointree, true, false);
+	Relids relids_without_outer = get_relids_in_jointree((Node *) query->jointree, false, false);
+	Relids outerjoin_relids = bms_del_members(relids_with_outer, relids_without_outer);
+
+	bms_free(relids_without_outer);
+#endif
+
+	matviewname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(matviewRel)),
+											 RelationGetRelationName(matviewRel));
+
+	/*
+	 * For each term in normalized form where any angling tuples can be inserted
+	 * into the view, build a query for the insertion and perform it.
+	 */
+	foreach (lc, terms)
+	{
+		ListCell	*lc1, *lc2;
+		StringInfoData exists_cond;
+		StringInfoData targetlist;
+		StringInfoData count;
+		StringInfoData joined_cond;
+		StringInfoData joined_in_delta_cond;
+		Term *term = lfirst(lc);
+		int		i;
+		List	*anti_relids_modified = NULL;
+
+		/*
+		 * Check whether the modified table is anti-joined in this term. If so,
+		 * collect the relids of the anti-joined tables.
+		 */
+		foreach(lc1, term->anti_relids)
+		{
+			Relids relids = lfirst(lc1);
+			if (bms_is_member(index, relids))
+				anti_relids_modified = lappend(anti_relids_modified, relids);
+		}
+
+		if (list_length(anti_relids_modified) == 0)
+			continue;
+
+		/* Build the targetlist of dangling tuples to be inserted. */
+		initStringInfo(&targetlist);
+		foreach (lc1, query->targetList)
+		{
+			TargetEntry *tle = (TargetEntry *) lfirst(lc1);
+			Form_pg_attribute attr = TupleDescAttr(matviewRel->rd_att, tle->resno - 1);
+			char   *resname = NameStr(attr->attname);
+			Relids	tle_relids;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+			PlannerInfo root;
+#endif
+
+			if (tle->resjunk)
+				continue;
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+			tle = (TargetEntry *) flatten_join_alias_vars(NULL, query, (Node *) tle);
+#else
+			tle = (TargetEntry *) flatten_join_alias_vars(query, (Node *) tle);
+#endif
+
+			/* get relids referenced in this target entry */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+			tle_relids = pull_varnos(&root, (Node *) tle);
+#else
+			tle_relids = pull_varnos((Node *) tle);
+#endif
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 160000)
+			tle_relids = bms_del_members(tle_relids, outerjoin_relids);
+#endif
+
+			/*
+			 * Check whether all column under this target entry come from joined tables
+			 * in this term. This means that the columns belong to the nonnullable table,
+			 * and this part of the vars in the primary delta can be used as the
+			 * non-nullable part of the dangling tuples inserted into the view.
+			 * For other target entries of the dangling tuples, NULL is inserted,
+			 * since we assume that the entry expression does not contain
+			 * any non-strict function.
+			 *
+			 * XXX: We could relax this assumption if we would eval the targetlist on the
+			 * dangling part of outer join results, but we don't support such evaluation.
+			 */
+			if (bms_is_subset(tle_relids, term->relids))
+				appendStringInfo(&targetlist, "%s%s", targetlist.len ? "," : "", resname);
+			
+			bms_free(tle_relids);
+		}
+
+		initStringInfo(&exists_cond);
+		initStringInfo(&joined_cond);
+		initStringInfo(&count);
+
+		i = -1;
+		/* for each of tables inter-joined in this term */
+		while ((i = bms_next_member(term->relids, i)) >= 0)
+		{
+			OuterJoinRelInfo *info;
+			bool found = false;
+
+			/* seach outer-join relation info */
+			foreach (lc1, outerjoin_relinfo)
+			{
+				info = lfirst(lc1);
+				if (info->rtindex == i)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			/*
+			 * The rel is not involved in the outer join; it is only inner-joined
+			 * to another outer-joined table, so it does not have outer-join info,
+			 * and is skipped.
+			 */
+			if (!found)
+				continue;
+
+			/*
+			 * Build a condition to check whether the view still has any tuple that
+			 * satisfies the join qual which produces the dangling tuple we are trying
+			 * to insert.
+			 *
+			 * The qual should be satisfied when the values of vars referenced by the
+			 * join quals are equal between the dangling tuple and the view
+			 * (which also implies they are not null).
+			 *
+			 * Note that we assume that vars referenced in join quals be included
+			 * in the view.
+			 *
+			 * XXX: We would be able to use primary keys instead if they are included,
+			 * but we cannot expect it for now.
+			 *
+			 * Also, build a condition to check whether a tuple belongs to any terms
+			 * to which the dangling tuples to be inserted belong. For such tuples,
+			 * the keys of the tables joined in this term must be NOT NULL. In addition,
+			 * the keys anti-joined by any anti-join in this term must be NULL, since
+			 * this part is null-extended; the latter conditions are added later.
+			 */
+			foreach (lc1, info->key_attrs)
+			{
+				Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc1);
+				char *resname = NameStr(attr->attname);
+				char   *mv_resname = quote_qualified_identifier("mv", resname);
+				char   *diff_resname = quote_qualified_identifier("diff", resname);
+
+				appendStringInfo(&exists_cond, "%s", exists_cond.len ? " AND " : "");
+				generate_equal(&exists_cond, attr->atttypid,  mv_resname, diff_resname);
+
+				appendStringInfo(&joined_cond, "%s%s IS NOT NULL",
+								 joined_cond.len ? " AND " : "", resname);
+			}
+
+			/* counting the number of tuples to be inserted */
+			appendStringInfo(&count, "%s(__ivm_meta__->'%d')::pg_catalog.int8",
+							 count.len ? " OPERATOR(pg_catalog.*) " : "", i);
+		}
+
+		/*
+		 * Append to the condition built above a check that the keys anti-joined by
+		 * any anti-join in this term must be NULL.
+		 */
+		initStringInfo(&joined_in_delta_cond);
+		foreach(lc1, anti_relids_modified)
+		{
+			Relids anti_relids = (Relids) lfirst(lc1);
+
+			appendStringInfo(&joined_in_delta_cond, "%s%s",
+							 joined_in_delta_cond.len ? "OR" : "", joined_cond.data);
+
+			i = -1;
+			while ((i = bms_next_member(anti_relids, i)) >= 0)
+			{
+				OuterJoinRelInfo *info;
+				bool found = false;
+
+				/* seach outer-join relation info */
+				foreach (lc2, outerjoin_relinfo)
+				{
+					info = lfirst(lc2);
+					if (info->rtindex == i)
+					{
+						found = true;
+						break;
+					}
+				}
+
+				/*
+				 * The rel is not involved in the outer join; it is only inner-joined
+				 * to another outer-joined table, so it does not have outer-join info,
+				 * and is skipped.
+				 */
+				if (!found)
+					continue;
+
+				foreach (lc2, info->key_attrs)
+				{
+					Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc2);
+					char *resname = NameStr(attr->attname);
+					appendStringInfo(&joined_in_delta_cond, " AND %s IS NOT NULL", resname);
+				}
+			}
+		}
+
+		/* Insert dangling tuples if needed */
+		initStringInfo(&querybuf);
+		if (use_count)
+			appendStringInfo(&querybuf,
+				"INSERT INTO %s (%s, __ivm_count__) "
+					"SELECT diff.* FROM "
+						"(SELECT DISTINCT %s, %s AS __ivm_count__ FROM %s "
+						"WHERE %s ) AS diff "
+					"WHERE NOT EXISTS (SELECT 1 FROM %s mv WHERE %s)",
+				matviewname, targetlist.data,
+				targetlist.data, count.data, deltaname_old,
+				joined_in_delta_cond.data,
+				matviewname, exists_cond.data
+			);
+		else
+			appendStringInfo(&querybuf,
+				"INSERT INTO %s (%s) "
+					"SELECT %s FROM "
+						"(SELECT diff.*, pg_catalog.generate_series(1, diff.__ivm_count__) "
+						"FROM (SELECT DISTINCT %s, %s AS __ivm_count__ FROM %s "
+						"WHERE %s ) AS diff "
+					"WHERE NOT EXISTS (SELECT 1 FROM %s mv WHERE %s)) v",
+				matviewname, targetlist.data,
+				targetlist.data, targetlist.data, count.data, deltaname_old,
+				joined_in_delta_cond.data,
+				matviewname, exists_cond.data
+			);
+		if (SPI_exec(querybuf.data, 0) != SPI_OK_INSERT)
+			elog(ERROR, "SPI_exec failed: %s", querybuf.data);
+	}
+}
+
+/*
+ * delete_dangling_tuples
+ *
+ * Delete dangling tuples to be removed as a result of tuple insertions
+ * on a base table of the materialized view that has an outer join.
+ *
+ * The deletion is performed per term in the normalized form of the
+ * outer join query. Each term is an inner join of some base tables,
+ * which is usually null-extended due to one or more anti-joins with
+ * other base tables. Dangling tuples in a term can be deleted from 
+ * the view when the modified table is among the anti-joined tables.
+ *
+ * When a tuple is inserted into a table anti-joined in a term,
+ * some tuples that are the product of joining this tuple and tuples
+ * in other tables joined in this term are inserted into the view.
+ * As a result, dangling tuples generated by null-extending the
+ * inner-join part in this term must be deleted from the view unless
+ * there are no more such dangling tuples.
+ *
+ * The delta contained in dataname_new must be the primary delta, which
+ * includes only the changes in view tuples where the modified table is
+ * on the non-nullable side. It contains tuples inserted into the view
+ * as a result of insertions on the table, and the contents are used
+ * to generate the condition for deleting dangling tuples for each term.
+ *
+ * terms: the normalized form of the outer join query
+ * index: the rtindex of the modified table
+ * outerjoin_relinfo: the list of OuterJoinRel containing key resname information
+ */
+static void
+delete_dangling_tuples(List *terms, Query *query,
+					   Relation matviewRel, const char *deltaname_new, int index,
+					   List *outerjoin_relinfo)
+{
+	char	 *matviewname;
+	ListCell *lc;
+
+	matviewname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(matviewRel)),
+											 RelationGetRelationName(matviewRel));
+
+	/*
+	 * For each term in normalized form where any angling tuples can be deleted
+	 * from the view, build a query for the deletion and perform it.
+	 */
+	foreach (lc, terms)
+	{
+		ListCell	*lc1, *lc2;
+		StringInfoData querybuf;
+		StringInfoData dangling_cond;
+		StringInfoData key_cols;
+		StringInfoData joined_cond;
+		StringInfoData joined_in_delta_cond;
+		Term *term = lfirst(lc);
+		List	*anti_relids_modified = NULL;
+
+		/*
+		 * Check whether the modified table is anti-joined in this term. If so,
+		 * collect the relids of the anti-joined tables.
+		 */
+		foreach(lc1, term->anti_relids)
+		{
+			Relids relids = lfirst(lc1);
+			if (bms_is_member(index, relids))
+				anti_relids_modified = lappend(anti_relids_modified, relids);
+		}
+
+		if (list_length(anti_relids_modified) == 0)
+			continue;
+
+		initStringInfo(&dangling_cond);
+		initStringInfo(&key_cols);
+		initStringInfo(&joined_cond);
+
+		/* for each table invloving in the outer join */
+		foreach (lc1, outerjoin_relinfo)
+		{
+			OuterJoinRelInfo *info = lfirst(lc1);
+
+			/*
+			 * Build the condition to check whether a tuple belongs to this term,
+			 * and the list of key resnames of the tables joined in this term.
+			 *
+			 * Also, build a condition to check whether a tuple belongs to any terms
+			 * to which the dangling tuples to be deleted belong. For such tuples,
+			 * the keys of the tables joined in this term must be NOT NULL. In addition,
+			 * the keys anti-joined by any anti-join in this term must be NULL, since
+			 * this part is null-extended; the latter conditions are added later.
+			 */
+			foreach (lc2, info->key_attrs)
+			{
+				Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc2);
+				char *resname = NameStr(attr->attname);
+
+				if (bms_is_member(info->rtindex, term->relids))
+				{
+					appendStringInfo(&dangling_cond, "%s%s IS NOT NULL ",
+									 dangling_cond.len ? " AND " : "" , resname);
+					appendStringInfo(&joined_cond, "%s%s IS NOT NULL ",
+									 joined_cond.len ? " AND " : "", resname);
+					appendStringInfo(&key_cols, "%s%s",
+									 key_cols.len ? "," : "", resname);
+				}
+				else
+					appendStringInfo(&dangling_cond, "%s%s IS NULL ",
+									 dangling_cond.len ? " AND " : "", resname);
+			}
+		}
+
+		/*
+		 * Append to the condition built above a check that the keys anti-joined by
+		 * any anti-join in this term must be NULL.
+		 */
+		initStringInfo(&joined_in_delta_cond);
+		foreach(lc1, anti_relids_modified)
+		{
+			Relids anti_relids = (Relids) lfirst(lc1);
+			int i;
+
+			appendStringInfo(&joined_in_delta_cond, "%s%s",
+							 joined_in_delta_cond.len ? "OR" : "", joined_cond.data);
+
+			i = -1;
+			while ((i = bms_next_member(anti_relids, i)) >= 0)
+			{
+				OuterJoinRelInfo *info;
+				bool found = false;
+
+				/* seach outer-join relation info */
+				foreach (lc2, outerjoin_relinfo)
+				{
+					info = lfirst(lc2);
+					if (info->rtindex == i)
+					{
+						found = true;
+						break;
+					}
+				}
+
+				/*
+				 * The rel is not involved in the outer join; it is only inner-joined
+				 * to another outer-joined table, so it does not have outer-join info,
+				 * and is skipped.
+				 */
+				if (!found)
+					continue;
+
+				foreach (lc2, info->key_attrs)
+				{
+					Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc2);
+					char *resname = NameStr(attr->attname);
+					appendStringInfo(&joined_in_delta_cond, " AND %s IS NOT NULL", resname);
+				}
+			}
+		}
+
+		/* Delete dangling tuples if needed */
+		initStringInfo(&querybuf);
+		appendStringInfo(&querybuf,
+			"DELETE FROM %s "
+			"WHERE %s AND "
+				"(%s) IN (SELECT %s FROM %s diff WHERE %s)",
+			matviewname,
+			dangling_cond.data,
+			key_cols.data, key_cols.data, deltaname_new, joined_in_delta_cond.data
+		);
+		if (SPI_exec(querybuf.data, 0) != SPI_OK_DELETE)
+			elog(ERROR, "SPI_exec failed: %s", querybuf.data);
+	}
 }
 
 /*

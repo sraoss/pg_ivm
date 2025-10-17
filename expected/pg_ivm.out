@@ -1441,10 +1441,6 @@ SELECT * FROM mv_mytype;
 (1 row)
 
 ROLLBACK;
--- outer join is not supported
-SELECT pgivm.create_immv('mv(a,b)',
-    'SELECT a.i, b.i FROM mv_base_a a LEFT JOIN mv_base_b b ON a.i=b.i');
-ERROR:  OUTER JOIN is not supported on incrementally maintainable materialized view
 -- contain system column
 SELECT pgivm.create_immv('mv_ivm01', 'SELECT i,j,xmin FROM mv_base_a');
 ERROR:  system column is not supported on incrementally maintainable materialized view
