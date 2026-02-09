@@ -1270,6 +1270,32 @@ ROLLBACK TO p1;
 DROP TABLE mv;
 DROP VIEW v;
 
+-- with cross join
+\set tl 'r,s,t,u'
+SELECT pgivm.create_immv('mv(r, s, t, u)',
+ 'SELECT r.i, s.i, t.j, u.j
+    FROM (base_r r LEFT JOIN
+	       (base_s s CROSS JOIN (base_t t FULL JOIN base_u u ON ((t.j = u.j))))
+		 ON ((r.i = s.i)))');
+CREATE VIEW v(r, s, t, u) AS
+ SELECT r.i, s.i, t.j, u.j
+    FROM (base_r r LEFT JOIN
+	       (base_s s CROSS JOIN (base_t t FULL JOIN base_u u ON ((t.j = u.j))))
+		 ON ((r.i = s.i)));
+SAVEPOINT p1;
+TRUNCATE base_r;
+TRUNCATE base_s;
+TRUNCATE base_t;
+TRUNCATE base_u;
+--INSERT INTO base_r VALUES (100),(100);
+INSERT INTO base_r VALUES (100);
+INSERT INTO base_s VALUES (100);
+INSERT INTO base_t VALUES (1);
+SELECT is_match(:'tl');
+ROLLBACK TO p1;
+DROP TABLE mv;
+DROP VIEW v;
+
 -- support simultaneous table changes on outer join
 \set tl 'r, s'
 SELECT pgivm.create_immv('mv(r, s)',

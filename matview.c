@@ -2246,7 +2246,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 	ListCell	*l1, *l2;
 	Relids		qual_relids;
 	Relids		qual_relids_l = NULL, qual_relids_r = NULL;
-	Relids		anti_relids_l = NULL, anti_relids_r = NULL;
+	List		*anti_relids_l = NIL, *anti_relids_r = NIL;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	PlannerInfo root;
 #endif
@@ -2338,8 +2338,9 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 			 * If this RHS term is participating in the outer join and the size
 			 * of its inner-joined relids is minimal among such terms, add it to
 			 * the list of anti-joined relids for the LHS terms.  Other terms with
-			 * larger inner-joined relids are eliminated under the condition that
-			 * the join qual is null-rejecting.  For example, in the following term:
+			 * larger inner-joined relids (superset of another) are eliminated under
+			 * the condition that the join qual is null-rejecting.  For example,
+			 * in the following term:
 			 *
 			 *  T anti-join [(R1 join R2) + (R1 anti-join R2)]
 			 *
@@ -2354,17 +2355,31 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 			 *
 			 *  T anti-join (R1 join R2)
 			 *
-			 * The resultant anti_relids_r represents the relids of
+			 * The resultant anti_relids_r represents the list of relids of
 			 * tables that could be anti-joined with every term
 			 * on the LHS.
 			 */
 			Term *rterm = (Term*) lfirst(l1);
 			if (bms_is_subset(qual_relids_r, rterm->relids))
 			{
-				if (!anti_relids_r)
-					anti_relids_r = bms_copy(rterm->relids);
-				else
-					anti_relids_r = bms_int_members(anti_relids_r, rterm->relids);
+				ListCell *lc;
+				bool add = true;
+				foreach(lc, anti_relids_r)
+				{
+					Relids relids = (Relids) lfirst(lc);
+					/*
+					 * Remove existing term such that it is a superset of the new one.
+					 * Also, if there is already a term which is a subset of the one that
+					 * we are trying to add, we cannot do it.
+					 */
+					if (bms_is_subset(rterm->relids, relids))
+						anti_relids_r = list_delete_cell(anti_relids_r, lc);
+					else if (bms_is_subset(relids, rterm->relids))
+						add = false;
+				}
+				if (add)
+					anti_relids_r = lappend(anti_relids_r, bms_copy(rterm->relids));
+
 			}
 		}
 	}
@@ -2377,17 +2392,25 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 			/*
 			 * Same, except for the right and left sides.  See the comment above.
 			 *
-			 * The resultant anti_relids_l represents the relids of
+			 * The resultant anti_relids_l represents the list of relids of
 			 * tables that could be anti-joined with every term
 			 * on the RHS.
 			 */
 			Term *lterm = (Term*) lfirst(l1);
 			if (bms_is_subset(qual_relids_l, lterm->relids))
 			{
-				if (!anti_relids_l)
-					anti_relids_l = bms_copy(lterm->relids);
-				else
-					anti_relids_l = bms_int_members(anti_relids_l, lterm->relids);
+				ListCell *lc;
+				bool add = true;
+				foreach(lc, anti_relids_l)
+				{
+					Relids relids = (Relids) lfirst(lc);
+					if (bms_is_subset(lterm->relids, relids))
+						anti_relids_l = list_delete_cell(anti_relids_l, lc);
+					else if (bms_is_subset(relids, lterm->relids))
+						add = false;
+				}
+				if (add)
+					anti_relids_l = lappend(anti_relids_l, bms_copy(lterm->relids));
 			}
 		}
 	}
@@ -2432,7 +2455,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 				(jointype == JOIN_RIGHT || jointype == JOIN_FULL))
 			{
 				if (bms_is_subset(qual_relids_r, rterm->relids))
-					rterm->anti_relids = lappend(rterm->anti_relids, bms_copy(anti_relids_l));
+					rterm->anti_relids = list_concat(rterm->anti_relids, list_copy(anti_relids_l));
 			}
 		}
 
@@ -2446,7 +2469,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 		if (jointype == JOIN_LEFT || jointype == JOIN_FULL)
 		{
 			if (bms_is_subset(qual_relids_l, lterm->relids))
-				lterm->anti_relids = lappend(lterm->anti_relids, bms_copy(anti_relids_r));
+				lterm->anti_relids = list_concat(lterm->anti_relids, list_copy(anti_relids_r));
 		}
 	}
 
@@ -2473,9 +2496,9 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 	bms_free(qual_relids_l);
 	bms_free(qual_relids_r);
 	if (anti_relids_l)
-		bms_free(anti_relids_l);
+		list_free(anti_relids_l);
 	if (anti_relids_r)
-		bms_free(anti_relids_r);
+		list_free(anti_relids_r);
 
 	return result;
 }
@@ -4231,7 +4254,7 @@ insert_dangling_tuples(List *terms, Query *query,
 			Relids anti_relids = (Relids) lfirst(lc1);
 
 			appendStringInfo(&joined_in_delta_cond, "%s%s",
-							 joined_in_delta_cond.len ? "OR" : "", joined_cond.data);
+							 joined_in_delta_cond.len ? " OR " : "", joined_cond.data);
 
 			i = -1;
 			while ((i = bms_next_member(anti_relids, i)) >= 0)
@@ -4418,7 +4441,7 @@ delete_dangling_tuples(List *terms, Query *query,
 			int i;
 
 			appendStringInfo(&joined_in_delta_cond, "%s%s",
-							 joined_in_delta_cond.len ? "OR" : "", joined_cond.data);
+							 joined_in_delta_cond.len ? " OR " : "", joined_cond.data);
 
 			i = -1;
 			while ((i = bms_next_member(anti_relids, i)) >= 0)
