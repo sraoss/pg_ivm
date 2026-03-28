@@ -661,6 +661,27 @@ DROP TABLE num_tbl CASCADE;
 DROP USER regress_ivm_user;
 DROP USER regress_ivm_admin;
 
+-- trigger updating the same table
+BEGIN;
+CREATE TABLE tbl_update_same (i int);
+CREATE FUNCTION func_update_same() RETURNS TRIGGER AS
+ $$ BEGIN UPDATE tbl_update_same SET i = i + 1; RETURN NEW; END; $$
+ LANGUAGE plpgsql;
+CREATE TRIGGER trig_update_same AFTER INSERT ON tbl_update_same FOR EACH ROW
+ EXECUTE FUNCTION func_update_same();
+SELECT pgivm.create_immv('mv_update_same', 'SELECT * FROM tbl_update_same');
+INSERT INTO tbl_update_same VALUES (1);
+SELECT * FROM mv_update_same;
+
+-- self-referential FKs
+CREATE TABLE tbl_self_ref (a int primary key,
+						   b int references tbl_self_ref(a) ON UPDATE CASCADE);
+INSERT INTO tbl_self_ref VALUES (1, null), (2, 1), (3, 2);
+SELECT pgivm.create_immv('mv_self_ref', 'SELECT * FROM tbl_self_ref');
+UPDATE tbl_self_ref set a = a + 10;
+SELECT * FROM mv_self_ref ORDER BY a;
+ROLLBACK;
+
 -- automatic index creation
 BEGIN;
 CREATE TABLE base_a (i int primary key, j int);
