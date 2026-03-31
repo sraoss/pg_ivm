@@ -5,7 +5,7 @@
  *    Routines for convert stored expressions/querytrees back to
  *	  source text
  *
- * Portions Copyright (c) 2022, IVM Development Group
+ * Portions Copyright (c) 2026, IVM Development Group
  * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
