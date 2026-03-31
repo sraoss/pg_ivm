@@ -455,5 +455,5 @@ IVM Development Group
 
 ## Copyright
 - Portions Copyright (c) 1996-2022, PostgreSQL Global Development Group
-- Portions Copyright (c) 2022, IVM Development Group
+- Portions Copyright (c) 2026, IVM Development Group
 
