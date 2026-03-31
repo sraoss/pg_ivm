@@ -4184,6 +4184,9 @@ insert_dangling_tuples(List *terms, Query *query,
 		{
 			OuterJoinRelInfo *info;
 			bool found = false;
+			StringInfoData joined_cols;
+
+			initStringInfo(&joined_cols);
 
 			/* seach outer-join relation info */
 			foreach (lc1, outerjoin_relinfo)
@@ -4233,11 +4236,16 @@ insert_dangling_tuples(List *terms, Query *query,
 				char   *diff_resname = quote_qualified_identifier("diff", resname);
 
 				appendStringInfo(&exists_cond, "%s", exists_cond.len ? " AND " : "");
+				appendStringInfo(&exists_cond, "(");
 				generate_equal(&exists_cond, attr->atttypid,  mv_resname, diff_resname);
+				appendStringInfo(&exists_cond, " OR (%s IS NULL AND %s IS NULL))",
+						 mv_resname, diff_resname);
 
-				appendStringInfo(&joined_cond, "%s%s IS NOT NULL",
-								 joined_cond.len ? " AND " : "", resname);
+				appendStringInfo(&joined_cols, "%s%s",
+								 joined_cols.len ? "," : "", resname);
 			}
+			appendStringInfo(&joined_cond, "%s(NOT (%s) IS NULL)",
+							 joined_cond.len ? " AND " : "", joined_cols.data);
 
 			/* counting the number of tuples to be inserted */
 			appendStringInfo(&count, "%s(__ivm_meta__->'%d')::pg_catalog.int8",
@@ -4252,9 +4260,12 @@ insert_dangling_tuples(List *terms, Query *query,
 		foreach(lc1, anti_relids_modified)
 		{
 			Relids anti_relids = (Relids) lfirst(lc1);
+			StringInfoData joined_cols;
 
-			appendStringInfo(&joined_in_delta_cond, "%s%s",
-							 joined_in_delta_cond.len ? " OR " : "", joined_cond.data);
+			initStringInfo(&joined_cols);
+
+			appendStringInfo(&joined_in_delta_cond, "%s (%s) ",
+							 joined_in_delta_cond.len ? "OR" : "", joined_cond.data);
 
 			i = -1;
 			while ((i = bms_next_member(anti_relids, i)) >= 0)
@@ -4285,8 +4296,12 @@ insert_dangling_tuples(List *terms, Query *query,
 				{
 					Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc2);
 					char *resname = NameStr(attr->attname);
-					appendStringInfo(&joined_in_delta_cond, " AND %s IS NOT NULL", resname);
+					appendStringInfo(&joined_cols, "%s%s",
+									 joined_cols.len ? "," : "", resname);
 				}
+
+				appendStringInfo(&joined_cond, "%s(NOT (%s) IS NULL)",
+								 joined_cond.len ? " AND " : "", joined_cols.data);
 			}
 		}
 
@@ -4331,7 +4346,7 @@ insert_dangling_tuples(List *terms, Query *query,
  * The deletion is performed per term in the normalized form of the
  * outer join query. Each term is an inner join of some base tables,
  * which is usually null-extended due to one or more anti-joins with
- * other base tables. Dangling tuples in a term can be deleted from 
+ * other base tables. Dangling tuples in a term can be deleted from
  * the view when the modified table is among the anti-joined tables.
  *
  * When a tuple is inserted into a table anti-joined in a term,
@@ -4374,6 +4389,7 @@ delete_dangling_tuples(List *terms, Query *query,
 		StringInfoData key_cols;
 		StringInfoData joined_cond;
 		StringInfoData joined_in_delta_cond;
+		StringInfoData exists_cond;
 		Term *term = lfirst(lc);
 		List	*anti_relids_modified = NULL;
 
@@ -4394,11 +4410,16 @@ delete_dangling_tuples(List *terms, Query *query,
 		initStringInfo(&dangling_cond);
 		initStringInfo(&key_cols);
 		initStringInfo(&joined_cond);
+		initStringInfo(&exists_cond);
 
 		/* for each table invloving in the outer join */
 		foreach (lc1, outerjoin_relinfo)
 		{
 			OuterJoinRelInfo *info = lfirst(lc1);
+			StringInfoData joined_cond2;
+			StringInfoData dangling_cond2;
+			initStringInfo(&joined_cond2);
+			initStringInfo(&dangling_cond2);
 
 			/*
 			 * Build the condition to check whether a tuple belongs to this term,
@@ -4417,17 +4438,33 @@ delete_dangling_tuples(List *terms, Query *query,
 
 				if (bms_is_member(info->rtindex, term->relids))
 				{
-					appendStringInfo(&dangling_cond, "%s%s IS NOT NULL ",
-									 dangling_cond.len ? " AND " : "" , resname);
-					appendStringInfo(&joined_cond, "%s%s IS NOT NULL ",
-									 joined_cond.len ? " AND " : "", resname);
+					char   *mv_resname = quote_qualified_identifier("mv", resname);
+					char   *diff_resname = quote_qualified_identifier("diff", resname);
+
+					appendStringInfo(&dangling_cond2, "%s%s IS NOT NULL ",
+									 dangling_cond2.len ? " OR " : "" , resname);
+					appendStringInfo(&joined_cond2, "%s%s IS NOT NULL ",
+									 joined_cond2.len ? " OR " : "", diff_resname);
 					appendStringInfo(&key_cols, "%s%s",
 									 key_cols.len ? "," : "", resname);
+
+					appendStringInfo(&exists_cond, "%s", exists_cond.len ? " AND " : "");
+					appendStringInfo(&exists_cond, "(");
+					generate_equal(&exists_cond, attr->atttypid,  mv_resname, diff_resname);
+					appendStringInfo(&exists_cond, " OR (%s IS NULL AND %s IS NULL))",
+									 mv_resname, diff_resname);
 				}
 				else
 					appendStringInfo(&dangling_cond, "%s%s IS NULL ",
 									 dangling_cond.len ? " AND " : "", resname);
 			}
+
+			if(joined_cond2.len > 0)
+				appendStringInfo(&joined_cond, "%s(%s)",
+								 joined_cond.len ? " AND " : "", joined_cond2.data);
+			if(dangling_cond2.len > 0)
+				appendStringInfo(&dangling_cond, "%s(%s)",
+								 dangling_cond.len ? " AND " : "", dangling_cond2.data);
 		}
 
 		/*
@@ -4448,6 +4485,8 @@ delete_dangling_tuples(List *terms, Query *query,
 			{
 				OuterJoinRelInfo *info;
 				bool found = false;
+				StringInfoData joined_cond2;
+				initStringInfo(&joined_cond2);
 
 				/* seach outer-join relation info */
 				foreach (lc2, outerjoin_relinfo)
@@ -4472,20 +4511,25 @@ delete_dangling_tuples(List *terms, Query *query,
 				{
 					Form_pg_attribute attr = (Form_pg_attribute) lfirst(lc2);
 					char *resname = NameStr(attr->attname);
-					appendStringInfo(&joined_in_delta_cond, " AND %s IS NOT NULL", resname);
+					char   *diff_resname = quote_qualified_identifier("diff", resname);
+					appendStringInfo(&joined_cond2, "%s%s IS NOT NULL ",
+									 joined_cond2.len ? " OR " : "", diff_resname);
 				}
+				if(joined_cond2.len > 0)
+					appendStringInfo(&joined_in_delta_cond, "%s(%s)",
+									 joined_in_delta_cond.len ? " AND " : "", joined_cond2.data);
 			}
 		}
 
 		/* Delete dangling tuples if needed */
 		initStringInfo(&querybuf);
 		appendStringInfo(&querybuf,
-			"DELETE FROM %s "
+			"DELETE FROM %s mv "
 			"WHERE %s AND "
-				"(%s) IN (SELECT %s FROM %s diff WHERE %s)",
+				"EXISTS (SELECT 1 FROM %s diff WHERE %s AND %s)",
 			matviewname,
 			dangling_cond.data,
-			key_cols.data, key_cols.data, deltaname_new, joined_in_delta_cond.data
+			deltaname_new, joined_in_delta_cond.data, exists_cond.data
 		);
 		if (SPI_exec(querybuf.data, 0) != SPI_OK_DELETE)
 			elog(ERROR, "SPI_exec failed: %s", querybuf.data);
