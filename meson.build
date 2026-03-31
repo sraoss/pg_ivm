@@ -62,6 +62,7 @@ install_data(
   'pg_ivm--1.10--1.11.sql',
   'pg_ivm--1.11--1.12.sql',
   'pg_ivm--1.12--1.13.sql',
+  'pg_ivm--1.12--1.14.sql',
   'pg_ivm.control',
   install_dir: sharedir / 'extension',
 ) 
@@ -70,7 +71,7 @@ pg_regress = find_program('pg_regress',
   dirs: [pkglibdir / 'pgxs/src/test/regress']
 )
 
-regress_tests = ['pg_ivm', 'create_immv', 'refresh_immv']
+regress_tests = ['pg_ivm', 'create_immv', 'refresh_immv', 'outer_join']
 
 test('regress',
  pg_regress,
