@@ -66,7 +66,7 @@ IvmXactCallback(XactEvent event, void *arg)
 	if (event == XACT_EVENT_PRE_COMMIT)
 		AtPreCommit_IVM();
 	else if (event == XACT_EVENT_ABORT)
-		AtAbort_IVM(InvalidSubTransactionId);
+	AtAbort_IVM(InvalidSubTransactionId);
 }
 
 static void
@@ -74,7 +74,7 @@ IvmSubXactCallback(SubXactEvent event, SubTransactionId mySubid,
 				   SubTransactionId parentSubid, void *arg)
 {
 	if (event == SUBXACT_EVENT_ABORT_SUB)
-		AtAbort_IVM(mySubid);
+	AtAbort_IVM(mySubid);
 }
 
 
@@ -235,6 +235,8 @@ create_immv(PG_FUNCTION_ARGS)
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
 	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
+
+	free_parsestate(pstate);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }
@@ -406,7 +408,7 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
 			return;
 		
-		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
+		pgIvmImmv = table_open(pgIvmImmvOid, RowExclusiveLock);
 		ScanKeyInit(&key,
 					Anum_pg_ivm_immv_immvrelid,
 					BTEqualStrategyNumber, F_OIDEQ,

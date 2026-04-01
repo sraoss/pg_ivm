@@ -1023,7 +1023,7 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 					Relids	nonnullable_rels = find_nonnullable_rels((Node *) qry->jointree->quals);
 					List	*qual_vars = NIL;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-					PlannerInfo root;
+					PlannerInfo root = {0};
 #endif
 
 					foreach (lc, context->join_quals)
@@ -1335,7 +1335,7 @@ is_equijoin_condition(OpExpr *op, check_ivm_restriction_context *context)
 	Relids		right_varnos;
 	Oid			opinputtype;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-	PlannerInfo root;
+	PlannerInfo root = {0};
 #endif
 
 	/* Is it a binary opclause? */
@@ -1789,7 +1789,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 	query = copyObject(query);
 	foreach (lc, query->cteList)
 	{
-		PlannerInfo root;
+		PlannerInfo root = {0};
 		CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
 
 		if (cte->cterefcount == 0)

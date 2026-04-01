@@ -1108,7 +1108,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 	{
 		Relids all_qual_vars;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-		PlannerInfo root;
+		PlannerInfo root = {0};
 #endif
 
 		terms = get_normalized_form(query, (Node *) query->jointree,
@@ -1410,6 +1410,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 			}
 			PG_CATCH();
 			{
+				in_delta_calculation = false;
 				immv_maintenance_depth = old_depth;
 				PG_RE_THROW();
 			}
@@ -1504,7 +1505,7 @@ rewrite_query_for_preupdate_state(Query *query, List *tables,
 	/* convert CTEs to subqueries */
 	foreach (lc, query->cteList)
 	{
-		PlannerInfo root;
+		PlannerInfo root = {0};
 		CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
 
 		if (cte->cterefcount == 0)
@@ -1707,7 +1708,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	Query *subquery;
 	ParseState *pstate;
 	char *relname;
-	static char *subquery_tl;
+	char *subquery_tl;
 	int i;
 
 	pstate = make_parsestate(NULL);
@@ -2248,7 +2249,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 	Relids		qual_relids_l = NULL, qual_relids_r = NULL;
 	List		*anti_relids_l = NIL, *anti_relids_r = NIL;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-	PlannerInfo root;
+	PlannerInfo root = {0};
 #endif
 
 	Assert(jointype == JOIN_LEFT || jointype == JOIN_RIGHT ||
@@ -4134,7 +4135,7 @@ insert_dangling_tuples(List *terms, Query *query,
 			char   *resname = NameStr(attr->attname);
 			Relids	tle_relids;
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
-			PlannerInfo root;
+			PlannerInfo root = {0};
 #endif
 
 			if (tle->resjunk)
@@ -4868,25 +4869,28 @@ setLastUpdateXid(Oid immv_oid, FullTransactionId xid)
 								  true, NULL, 1, &key);
 	tup = systable_getnext(scan);
 
-	memset(values, 0, sizeof(values));
-	values[Anum_pg_ivm_immv_lastivmupdate -1 ] = FullTransactionIdGetDatum(xid);
-	MemSet(nulls, false, sizeof(nulls));
-	MemSet(replaces, false, sizeof(replaces));
-	replaces[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
+	if (HeapTupleIsValid(tup))
+	{
+		memset(values, 0, sizeof(values));
+		values[Anum_pg_ivm_immv_lastivmupdate -1 ] = FullTransactionIdGetDatum(xid);
+		MemSet(nulls, false, sizeof(nulls));
+		MemSet(replaces, false, sizeof(replaces));
+		replaces[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
 
-	newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
+		newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
 
-	CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
-	heap_freetuple(newtup);
+		CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+		heap_freetuple(newtup);
 
-	/*
-	 * Advance command counter to make the updated pg_ivm_immv row locally
-	 * visible.
-	 */
-	CommandCounterIncrement();
+		/*
+		 * Advance command counter to make the updated pg_ivm_immv row locally
+		 * visible.
+		 */
+		CommandCounterIncrement();
+	}
 
 	systable_endscan(scan);
-	table_close(pgIvmImmv, ShareRowExclusiveLock);
+	table_close(pgIvmImmv, NoLock);
 }
 
 /*
@@ -4915,10 +4919,19 @@ getLastUpdateXid(Oid immv_oid)
 								  true, NULL, 1, &key);
 
 	tup = systable_getnext(scan);
-	datum = heap_getattr(tup, Anum_pg_ivm_immv_lastivmupdate, tupdesc, &isnull);
+	if (HeapTupleIsValid(tup))
+	{
+		datum = heap_getattr(tup, Anum_pg_ivm_immv_lastivmupdate, tupdesc, &isnull);
 
-	if (!isnull)
-		xid = DatumGetFullTransactionId(datum);
+		if (!isnull)
+			xid = DatumGetFullTransactionId(datum);
+	}
+	else
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("materialized view \"%u\" is not an IMMV", immv_oid)));
+	}
 
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);
