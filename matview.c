@@ -206,8 +206,8 @@ static char*make_subquery_targetlist_from_table(MV_TriggerTable *table);
 static char *make_delta_enr_name(const char *prefix, Oid relid, int count);
 static RangeTblEntry *get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 				 QueryEnvironment *queryEnv, Oid matviewid);
-static RangeTblEntry *union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
-		   const char *prefix, QueryEnvironment *queryEnv);
+static RangeTblEntry *makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
+									 bool is_new, QueryEnvironment *queryEnv);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
 static List *get_normalized_form(Query *query, Node *jtnode, Relids outer_join_rels,
@@ -780,7 +780,6 @@ tuplestore_copy(Tuplestorestate *tuplestore, Relation rel)
 
 	return res;
 }
-
 
 /* ----------------------------------------------------
  *		Incremental View Maintenance routines
@@ -1731,21 +1730,34 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 			subquery_tl, relname, matviewid);
 
 	/*
-	 * Append deleted rows contained in old transition tables.
+	 * Re-add rows deleted from the old transition tables, excluding those
+	 * also present in the new transition tables.
 	 *
-	 * Add a pseudo ctid to ENR using row_number(), which is required for
+	 * Also, add a pseudo ctid to ENR using row_number(), which is required for
 	 * calculating the number of dangling tuples to be inserted into
 	 * the outer join view.
 	 */
-	for (i = 0; i < list_length(table->old_tuplestores); i++)
+	if (list_length(table->old_tuplestores) > 0)
 	{
-		appendStringInfo(&str, " UNION ALL ");
-		appendStringInfo(&str," SELECT %s, "
-			" ((row_number() over())::text || '_' || '%d' || '_' || '%d') AS ctid"
-			" FROM %s",
-			subquery_tl,
-			table->table_id, i,
-			make_delta_enr_name("old", table->table_id, i));
+		appendStringInfo(&str," UNION ALL SELECT %s, "
+			" (pg_catalog.row_number() over())::text AS ctid"
+			" FROM (",
+			subquery_tl);
+
+		for (i = 0; i < list_length(table->old_tuplestores); i++)
+		{
+			if (i != 0)
+				appendStringInfo(&str, " UNION ALL ");
+			appendStringInfo(&str," TABLE %s",
+				make_delta_enr_name("old", table->table_id, i));
+		}
+		for (i = 0; i < list_length(table->new_tuplestores); i++)
+		{
+			appendStringInfo(&str, " EXCEPT ALL ");
+			appendStringInfo(&str," TABLE %s",
+				make_delta_enr_name("new", table->table_id, i));
+		}
+		appendStringInfo(&str,")");
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1845,18 +1857,22 @@ make_delta_enr_name(const char *prefix, Oid relid, int count)
 /*
  * union_ENRs
  *
- * Replace RTE of the modified table with a single table delta that combine its
- * all transition tables.
+ * Make a RTE representing a delta of the specified table.
  */
 static RangeTblEntry*
-union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
-		   const char *prefix, QueryEnvironment *queryEnv)
+makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
+		   bool is_new, QueryEnvironment *queryEnv)
 {
 	StringInfoData str;
 	ParseState	*pstate;
 	RawStmt *raw;
 	Query *sub;
 	int	i;
+
+	const char *prefix_union = is_new ? "new" : "old";
+	const char *prefix_except = is_new ? "old" : "new";
+	int num_union = is_new ? list_length(table->new_rtes) : list_length(table->old_rtes);
+	int num_except = is_new ? list_length(table->old_rtes) : list_length(table->new_rtes);
 
 	/* the previous RTE must be a subquery which represents "pre-state" table */
 	Assert(rte->rtekind == RTE_SUBQUERY);
@@ -1866,25 +1882,36 @@ union_ENRs(RangeTblEntry *rte, MV_TriggerTable *table, List *enr_rtes,
 	pstate->p_queryEnv = queryEnv;
 	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
+	/*
+	 * Add a pseudo ctid to ENR using row_number(), which is required for
+	 * calculating the number of dangling tuples to be inserted into
+	 * the outer join view.
+	 */
 	initStringInfo(&str);
-	for (i = 0; i < list_length(enr_rtes); i++)
+	appendStringInfo(&str,
+		" SELECT %s,  "
+		" (pg_catalog.row_number() over())::text AS ctid"
+		" FROM (",
+		make_subquery_targetlist_from_table(table));
+
+	for (i = 0; i < num_union; i++)
 	{
 		if (i > 0)
 			appendStringInfo(&str, " UNION ALL ");
 
-		/*
-		 * Add a pseudo ctid to ENR using row_number(), which is required for
-		 * calculating the number of dangling tuples to be inserted into
-		 * the outer join view.
-		 */
 		appendStringInfo(&str,
-			" SELECT %s,  "
-			" ((row_number() over())::text || '_' || '%d' || '_' || '%d') AS ctid"
-			" FROM %s",
-			make_subquery_targetlist_from_table(table),
-			table->table_id, i,
-			make_delta_enr_name(prefix, table->table_id, i));
+			" TABLE  %s",
+			make_delta_enr_name(prefix_union, table->table_id, i));
 	}
+	for (i = 0; i < num_except; i++)
+	{
+		appendStringInfo(&str, " EXCEPT ALL ");
+
+		appendStringInfo(&str,
+			" TABLE  %s",
+			make_delta_enr_name(prefix_except, table->table_id, i));
+	}
+	appendStringInfo(&str,")");
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
@@ -2787,7 +2814,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	if (dest_old && list_length(table->old_rtes) > 0)
 	{
 		/* Replace the modified table with the old delta table and calculate the old view delta. */
-		lfirst(lc) = union_ENRs(rte, table, table->old_rtes, "old", queryEnv);
+		lfirst(lc) = makeDeltaTable(rte, table, false, queryEnv);
 		refresh_immv_datafill(dest_old, query, queryEnv, tupdesc_old, "");
 	}
 
@@ -2795,7 +2822,7 @@ calc_delta(MV_TriggerTable *table, List *rte_path, Query *query,
 	if (dest_new && list_length(table->new_rtes) > 0)
 	{
 		/* Replace the modified table with the new delta table and calculate the new view delta*/
-		lfirst(lc) = union_ENRs(rte, table, table->new_rtes, "new", queryEnv);
+		lfirst(lc) = makeDeltaTable(rte, table, true, queryEnv);
 		refresh_immv_datafill(dest_new, query, queryEnv, tupdesc_new, "");
 	}
 
