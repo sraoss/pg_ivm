@@ -319,7 +319,7 @@ CreateChangePreventTrigger(Oid matviewOid)
 		address = CreateTrigger(ivm_trigger, NULL, matviewOid, InvalidOid, InvalidOid,
 							 InvalidOid, InvalidOid, InvalidOid, NULL, true, false);
 
-		recordDependencyOn(&address, &refaddr, DEPENDENCY_AUTO);
+		recordDependencyOn(&address, &refaddr, DEPENDENCY_INTERNAL);
 	}
 
 	/* Make changes-so-far visible */
