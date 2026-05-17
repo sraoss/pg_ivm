@@ -20,6 +20,7 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_namespace_d.h"
 #include "catalog/pg_trigger_d.h"
+#include "commands/tablecmds.h"
 #include "commands/trigger.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
@@ -53,6 +54,7 @@ static void PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 
 /* SQL callable functions */
 PG_FUNCTION_INFO_V1(create_immv);
+PG_FUNCTION_INFO_V1(restore_immv);
 PG_FUNCTION_INFO_V1(refresh_immv);
 PG_FUNCTION_INFO_V1(IVM_prevent_immv_change);
 PG_FUNCTION_INFO_V1(get_immv_def);
@@ -234,9 +236,94 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *) ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc);
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc, InvalidOid);
 
 	PG_RETURN_INT64(qc.nprocessed);
+}
+
+/*
+ * User interface for restoring metadata to an IMMV
+ */
+Datum
+restore_immv(PG_FUNCTION_ARGS)
+{
+	text	*t_relname = PG_GETARG_TEXT_PP(0);
+	text	*t_sql = PG_GETARG_TEXT_PP(1);
+	bool	populate = PG_GETARG_BOOL(2);
+	char	*relname = text_to_cstring(t_relname);
+	char	*sql = text_to_cstring(t_sql);
+	List	*parsetree_list;
+	RawStmt	*parsetree;
+	Query	*query;
+
+	RangeVar	*immv;
+	Oid			matviewOid;
+
+	ParseState *pstate = make_parsestate(NULL);
+	CreateTableAsStmt *ctas;
+	StringInfoData command_buf;
+
+	immv = makeRangeVarFromNameList(textToQualifiedNameList(t_relname));
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+	matviewOid = RangeVarGetRelidExtended(immv,
+										  AccessExclusiveLock, 0,
+										  RangeVarCallbackOwnsTable,
+										  NULL);
+#else
+	matviewOid = RangeVarGetRelidExtended(immv,
+										  AccessExclusiveLock, 0,
+										  RangeVarCallbackMaintainsTable,
+										  NULL);
+#endif
+
+	initStringInfo(&command_buf);
+	appendStringInfo(&command_buf, "SELECT restore_immv('%s', '%s');", relname, sql);
+	appendStringInfo(&command_buf, "%s;", sql);
+	pstate->p_sourcetext = command_buf.data;
+
+	parsetree_list = pg_parse_query(sql);
+
+	/* XXX: should we check t_sql before command_buf? */
+	if (list_length(parsetree_list) != 1)
+		elog(ERROR, "invalid view definition");
+
+	parsetree = linitial_node(RawStmt, parsetree_list);
+
+	/* view definition should specify SELECT query */
+	if (!IsA(parsetree->stmt, SelectStmt))
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("view definition must specify SELECT statement")));
+
+	ctas = makeNode(CreateTableAsStmt);
+	ctas->query = parsetree->stmt;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
+	ctas->objtype = OBJECT_MATVIEW;
+#else
+	ctas->relkind = OBJECT_MATVIEW;
+#endif
+	ctas->is_select_into = false;
+	ctas->into = makeNode(IntoClause);
+	ctas->into->rel = immv;
+	ctas->into->colNames = NIL;
+	ctas->into->accessMethod = NULL;
+	ctas->into->options = NIL;
+	ctas->into->onCommit = ONCOMMIT_NOOP;
+	ctas->into->tableSpaceName = NULL;
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+	ctas->into->viewQuery = (Query *) parsetree->stmt;
+#else
+	ctas->into->viewQuery = parsetree->stmt;
+#endif
+	ctas->into->skipData = !populate;
+
+	query = transformStmt(pstate, (Node *) ctas);
+	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
+
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, NULL, matviewOid);
+
+	PG_RETURN_VOID();
 }
 
 /*
