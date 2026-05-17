@@ -38,7 +38,7 @@ extern List *PgIvmFuncName(char *name);
 /* createas.c */
 
 extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-									QueryCompletion *qc);
+									QueryCompletion *qc, Oid matviewOid);
 extern void CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid);
 extern void CreateIndexOnIMMV(Query *query, Relation matviewRel);
 extern Query *rewriteQueryForIMMV(Query *query, List *colNames);

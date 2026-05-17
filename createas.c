@@ -172,7 +172,7 @@ create_immv_internal(List *attrList, IntoClause *into)
 /*
  * create_immv_nodata
  *
- * Create an IMMV  when WITH NO DATA is used, starting from
+ * Create an IMMV when WITH NO DATA is used, starting from
  * the targetlist of the view definition.
  *
  * This imitates PostgreSQL's create_ctas_nodata().
@@ -241,6 +241,60 @@ create_immv_nodata(List *tlist, IntoClause *into)
 	return create_immv_internal(attrList, into);
 }
 
+static void
+check_immv_compatibility(Oid matviewOid, List *tlist, IntoClause *into)
+{
+	Relation	matviewRel;
+	TupleDesc	tupdesc;
+	ListCell   *t;
+	int			i;
+
+	Assert(into->colNames == NULL);
+
+	matviewRel = table_open(matviewOid, NoLock);
+	tupdesc = matviewRel->rd_att;
+
+	i = 0;
+	foreach(t, tlist)
+	{
+		TargetEntry *tle = (TargetEntry *) lfirst(t);
+		Form_pg_attribute attr;
+
+		if (tle->resjunk)
+			continue;
+
+		do {
+			if (i >= tupdesc->natts)
+				ereport(ERROR,
+						(errcode(ERRCODE_DATATYPE_MISMATCH),
+						 errmsg("table is missing column \"%s\"",
+								tle->resname)));
+			attr = TupleDescAttr(tupdesc, i);
+			i++;
+		} while (attr->attisdropped);
+
+		if (strcmp(NameStr(attr->attname), tle->resname) != 0 ||
+			attr->atttypid != exprType((Node *) tle->expr) ||
+			attr->atttypmod != exprTypmod((Node *) tle->expr) ||
+			attr->attcollation != exprCollation((Node *) tle->expr))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("table definition mismatch with view definition"),
+					 errdetail("The column \"%s\" differs from the view definition.",
+							   tle->resname)));
+		}
+	}
+
+	while (TupleDescAttr(tupdesc, i)->attisdropped)
+		i++;
+	if (i < tupdesc->natts)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				errmsg("too many columns in table")));
+
+	table_close(matviewRel, NoLock);
+}
 
 /*
  * ExecCreateImmv -- execute a create_immv() function
@@ -249,16 +303,33 @@ create_immv_nodata(List *tlist, IntoClause *into)
  */
 ObjectAddress
 ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-				  QueryCompletion *qc)
+				  QueryCompletion *qc, Oid matviewOid)
 {
 	Query	   *query = castNode(Query, stmt->query);
 	IntoClause *into = stmt->into;
 	bool		do_refresh = false;
 	ObjectAddress address;
+	Relation matviewRel;
 
-	/* Check if the relation exists or not */
-	if (CreateTableAsRelExists(stmt))
-		return InvalidObjectAddress;
+	if (!OidIsValid(matviewOid))
+	{
+		/* Check if the relation exists or not */
+		if (CreateTableAsRelExists(stmt))
+			return InvalidObjectAddress;
+	}
+	else
+	{
+		matviewRel = table_open(matviewOid, NoLock);
+
+		/* check if metadata not exists */
+		if (get_immv_query(matviewRel))
+			ereport(ERROR,
+					(errcode(ERRCODE_DUPLICATE_OBJECT),
+					 errmsg("relation \"%s\" is already registered as an IMMV",
+							into->rel->relname)));
+
+		table_close(matviewRel, NoLock);
+	}
 
 	/*
 	 * The contained Query must be a SELECT.
@@ -268,6 +339,8 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	/*
 	 * For materialized views, always skip data during table creation, and use
 	 * REFRESH instead (see below).
+	 *
+	 * do_refresh is set to true for create_immv, or restore_immv with populate.
 	 */
 	do_refresh = !into->skipData;
 
@@ -283,35 +356,50 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	/* For IMMV, we need to rewrite matview query */
 	query = rewriteQueryForIMMV(query, into->colNames);
 
-	/*
-	 * If WITH NO DATA was specified, do not go through the rewriter,
-	 * planner and executor.  Just define the relation using a code path
-	 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
-	 * from running the planner before all dependencies are set up.
-	 */
-	address = create_immv_nodata(query->targetList, into);
+	if (!OidIsValid(matviewOid))
+		/*
+		 * If WITH NO DATA was specified, do not go through the rewriter,
+		 * planner and executor.  Just define the relation using a code path
+		 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
+		 * from running the planner before all dependencies are set up.
+		 */
+		address = create_immv_nodata(query->targetList, into);
+	else
+	{
+		/* check table compatibility */
+		check_immv_compatibility(matviewOid, query->targetList, into);
+
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+		StoreImmvQuery(matviewOid, into->viewQuery);
+#else
+		StoreImmvQuery(matviewOid, (Query *) into->viewQuery);
+#endif
+	}
 
 	/*
+	 * For create_immv or restore_immv with populate = true, generate
+	 * data by executing the view definition query.
+	 *
 	 * For materialized views, reuse the REFRESH logic, which locks down
 	 * security-restricted operations and restricts the search_path.  This
 	 * reduces the chance that a subsequent refresh will fail.
 	 */
 	if (do_refresh)
 	{
-		Relation matviewRel;
+		Oid relid = OidIsValid(matviewOid) ? matviewOid: address.objectId;
 
-		RefreshImmvByOid(address.objectId, true, false, pstate->p_sourcetext, qc);
+		RefreshImmvByOid(relid, true, false, pstate->p_sourcetext, qc);
 
 		if (qc)
 			qc->commandTag = CMDTAG_SELECT;
 
-		matviewRel = table_open(address.objectId, NoLock);
+		matviewRel = table_open(relid, NoLock);
 
 		/* Create an index on incremental maintainable materialized view, if possible */
 		CreateIndexOnIMMV(query, matviewRel);
 
 		/* Create triggers to prevent IMMV from being changed */
-		CreateChangePreventTrigger(address.objectId);
+		CreateChangePreventTrigger(relid);
 
 		table_close(matviewRel, NoLock);
 
@@ -321,6 +409,27 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 					 errdetail("The view may not include effects of a concurrent transaction."),
 					 errhint("create_immv should be used in isolation level READ COMMITTED, "
 							 "or execute refresh_immv to make sure the view is consistent.")));
+	}
+	/*
+	 * For restore_immv with populate = false (default), only restore
+	 * the metadata to pg_ivm_immv and create the maintenance triggers
+	 * and an index if possible.
+	 */
+	else
+	{
+		Assert(OidIsValid(matviewOid));
+
+		CreateIvmTriggersOnBaseTables(query, matviewOid);
+
+		matviewRel = table_open(matviewOid, NoLock);
+
+		/* Create an index on incremental maintainable materialized view, if possible */
+		CreateIndexOnIMMV(query, matviewRel);
+
+		/* Create triggers to prevent IMMV from being changed */
+		CreateChangePreventTrigger(matviewOid);
+
+		table_close(matviewRel, NoLock);
 	}
 
 	return address;

@@ -1,0 +1,4 @@
+#!/bin/sh
+
+psql "$@" -XAtqc \
+'SELECT * FROM pgivm.get_restore_immv_commands()'

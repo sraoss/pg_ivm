@@ -97,11 +97,11 @@ When `pg_ivm` is installed, the 'pgivm' schema is created, along with the follow
 
 ### Functions
 
-#### create_immv
+#### `create_immv`
 
 Use `create_immv` function to create IMMV.
 ```
-pgivm.create_immv(immv_name text, view_definition text) RETURNS bigint
+pgivm.create_immv(immv text, view_definition text) RETURNS bigint
 ```
 `create_immv` defines a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
@@ -111,27 +111,80 @@ When an IMMV is created, some triggers are automatically created so that the vie
 
 Note that if you use PostgreSQL 17 or later, while `create_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
-#### refresh_immv
+#### `restore_immv`
+
+Use `restore_immv` function to restores `pg_ivm` metadata for an existing IMMV.
+```
+pgivm.restore_immv(immv text, view_definition text, populate boolean DEFAULT false) RETURNS void
+```
+
+Unlike `create_immv()`, this function assumes that the IMMV table already exists. It recreates the metadata, triggers, and indexes required by `pg_ivm` without recreating the IMMV table itself.
+
+If `populate` is false (default), existing table contents are preserved, assuming that the table already contains correct data.  If `populate` is true, the contents of the IMMV are regenerated from the view definition.
+
+`restore_immv()` fails if the relation is already registered as an IMMV or if the existing table definition does not match the supplied view definition.
+
+#### `refresh_immv`
 
 Use `refresh_immv` function to refresh IMMV.
 ```
-pgivm.refresh_immv(immv_name text, with_data bool) RETURNS bigint
+pgivm.refresh_immv(immv text, with_data boolean DEFAULT true) RETURNS bigint
 ```
 
 `refresh_immv` completely replaces the contents of an IMMV as `REFRESH MATERIALIZED VIEW` command does for a materialized view. To execute this function you must be the owner of the IMMV (with PostgreSQL 16 or earlier) or have the `MAINTAIN` privilege on the IMMV (with PostgreSQL 17 or later).  The old contents are discarded.
 
-The with_data flag is corresponding to `WITH [NO] DATA` option of `REFRESH MATERIALIZED VIEW` command. If with_data is true, the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If with_data is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
+The `with_data` flag is corresponding to `WITH [NO] DATA` option of `REFRESH MATERIALIZED VIEW` command. If `with_data` is true (default), the backing query is executed to provide the new data, and if the IMMV is unpopulated, triggers for maintaining the view are created. Also, a unique index is created for IMMV if it is possible and the view doesn't have that yet. If `with_data` is false, no new data is generated and the IMMV become unpopulated, and the triggers are dropped from the IMMV. Note that unpopulated IMMV is still scannable although the result is empty. This behaviour may be changed in future to raise an error when an unpopulated IMMV is scanned.
 
 `refresh_immv` acquires `AccessExclusiveLock` on the view. However, even if we are able to acquire the lock, a concurrent transaction may have already incrementally updated and committed the view before we can acquire the lock.  In `REPEATABLE READ` or `SERIALIZABLE` isolation level, this could lead to an inconsistent state of the view. Therefore, an error is raised to prevent anomalies when this situation is detected.
 
 Note that if you use PostgreSQL 17 or later, while `refresh_immv` is running, the `search_path` is temporarily changed to `pg_catalog, pg_temp`.
 
-#### get_immv_def
+#### `get_immv_def`
 
 `get_immv_def` reconstructs the underlying SELECT command for an IMMV. (This is a decompiled reconstruction, not the original text of the command.)
 ```
-pgivm.get_immv_def(immv regclass) RETURNS text
+pgivm.get_immv_def(immvrelid regclass) RETURNS text
 ```
+
+#### `get_create_immv_commands`
+
+```
+pgivm.get_create_immv_commands() RETURNS SETOF text
+```
+
+Returns SQL commands that invoke `pgivm.create_immv()` to recreate all IMMVs.
+
+#### `get_restore_immv_commands`
+
+```
+pgivm.get_restore_immv_commands() RETURNS SETOF text
+```
+
+Returns SQL commands that invoke `pgivm.restore_immv()` to restore IMMV metadata after `pg_dump` or `pg_upgrade`.
+
+### Script
+
+#### `pg_ivm_dump_metadata`
+
+Generate SQL commands that invoke `pgivm.restore_immv()` for all IMMVs in the database.
+
+The metadata stored in `pgivm.pg_ivm_immv` contains an internal query representation generated by PostgreSQL. Since this representation may change across PostgreSQL versions, the contents of `pgivm.pg_ivm_immv` are not included in `pg_dump` output.
+
+Before running `pg_dump` or `pg_upgrade`:
+
+```bash
+$ pg_ivm_dump_metadata mydb > immv_restore.sql
+```
+
+After restoring the database from `pg_dump` or completing `pg_upgrade`:
+
+```bash
+$ psql mydb -f immv_restore.sql
+```
+
+The generated script recreates the metadata, triggers, and indexes required by `pg_ivm` without recreating the IMMV table itself.
+
+Note that IMMV contents themselves are still dumped and restored as ordinary table data. Only the metadata stored in `pgivm.pg_ivm_immv` is excluded from `pg_dump` output.
 
 ### IMMV metadata catalog
 
@@ -336,10 +389,6 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
            |   GROUP BY pgbench_accounts.bid
 (1 row)
 ```
-
-## `pg_dump` and `pg_upgrade`
-
-After restoring data from a `pg_dump` backup or upgrading `PostgreSQL` using `pg_upgrade`, all IMMVs must be manually dropped and recreated.
 
 ## Supported View Definitions and Restriction
 
