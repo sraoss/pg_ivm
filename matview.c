@@ -812,30 +812,8 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 	{
 		FullTransactionId xid;
 
-		/*
-		 * Wait for concurrent transactions which update this materialized view at
-		 * READ COMMITED. This is needed to see changes committed in other
-		 * transactions. No wait and raise an error at REPEATABLE READ or
-		 * SERIALIZABLE to prevent update anomalies of matviews.
-		 * XXX: dead-lock is possible here.
-		 */
-		if (!IsolationUsesXactSnapshot())
-			LockRelationOid(matviewOid, ExclusiveLock);
-		else if (!ConditionalLockRelationOid(matviewOid, ExclusiveLock))
-		{
-			/* try to throw error by name; relation could be deleted... */
-			char	   *relname = get_rel_name(matviewOid);
-
-			if (!relname)
-				ereport(ERROR,
-						(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-						errmsg("could not obtain lock on materialized view during incremental maintenance")));
-
-			ereport(ERROR,
-					(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-					errmsg("could not obtain lock on materialized view \"%s\" during incremental maintenance",
-							relname)));
-		}
+    /* XXX: dead-lock is possible here. */
+    LockRelationOid(matviewOid, ExclusiveLock);
 
 		/*
 		 * Even if we can acquire an lock, a concurrent transaction could have
