@@ -20,7 +20,14 @@
 #include "catalog/heap.h"
 #include "catalog/pg_collation_d.h"
 #include "catalog/pg_trigger.h"
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 190000)
+#include "commands/repack.h"	/* commands/cluster.h was renamed to
+								 * commands/repack.h when CLUSTER/VACUUM
+								 * FULL were merged into the new REPACK
+								 * command */
+#else
 #include "commands/cluster.h"
+#endif
 #include "commands/defrem.h"
 #include "commands/matview.h"
 #include "commands/tablecmds.h"
@@ -645,7 +652,11 @@ refresh_immv_datafill(DestReceiver *dest, Query *query,
 	CHECK_FOR_INTERRUPTS();
 
 	/* Plan the query which will generate data for the refresh. */
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 190000)
+	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL, NULL);
+#else
 	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL);
+#endif
 
 	/*
 	 * Use a snapshot with an updated command ID to ensure this query sees
@@ -695,8 +706,14 @@ refresh_immv_datafill(DestReceiver *dest, Query *query,
 static void
 refresh_by_heap_swap(Oid matviewOid, Oid OIDNewHeap, char relpersistence)
 {
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 190000)
+	finish_heap_swap(matviewOid, OIDNewHeap, false, false, true, true,
+					 true,		/* reindex */
+					 RecentXmin, ReadNextMultiXactId(), relpersistence);
+#else
 	finish_heap_swap(matviewOid, OIDNewHeap, false, false, true, true,
 					 RecentXmin, ReadNextMultiXactId(), relpersistence);
+#endif
 }
 
 /*
