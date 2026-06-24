@@ -2400,7 +2400,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 					 * we are trying to add, we cannot do it.
 					 */
 					if (bms_is_subset(rterm->relids, relids))
-						anti_relids_r = list_delete_cell(anti_relids_r, lc);
+						anti_relids_r = foreach_delete_current(anti_relids_r, lc);
 					else if (bms_is_subset(relids, rterm->relids))
 						add = false;
 				}
@@ -2432,7 +2432,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 				{
 					Relids relids = (Relids) lfirst(lc);
 					if (bms_is_subset(lterm->relids, relids))
-						anti_relids_l = list_delete_cell(anti_relids_l, lc);
+						anti_relids_l = foreach_delete_current(anti_relids_l, lc);
 					else if (bms_is_subset(relids, lterm->relids))
 						add = false;
 				}
