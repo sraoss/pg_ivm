@@ -1711,7 +1711,6 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 
 	pstate = make_parsestate(NULL);
 	pstate->p_queryEnv = queryEnv;
-	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
 	relname = quote_qualified_identifier(
 					get_namespace_name(RelationGetNamespace(table->rel)),
@@ -1758,6 +1757,9 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 				make_delta_enr_name("new", table->table_id, i));
 		}
 		appendStringInfo(&str,")");
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 160000)
+		appendStringInfo(&str," AS sub");
+#endif
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1880,7 +1882,6 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	/* Create a ParseState for rewriting the view definition query */
 	pstate = make_parsestate(NULL);
 	pstate->p_queryEnv = queryEnv;
-	pstate->p_expr_kind = EXPR_KIND_SELECT_TARGET;
 
 	/*
 	 * Add a pseudo ctid to ENR using row_number(), which is required for
@@ -1912,6 +1913,9 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 			make_delta_enr_name(prefix_except, table->table_id, i));
 	}
 	appendStringInfo(&str,")");
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 160000)
+	appendStringInfo(&str," AS sub");
+#endif
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
