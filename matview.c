@@ -2400,7 +2400,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 					 * we are trying to add, we cannot do it.
 					 */
 					if (bms_is_subset(rterm->relids, relids))
-						anti_relids_r = list_delete_cell(anti_relids_r, lc);
+						anti_relids_r = foreach_delete_current(anti_relids_r, lc);
 					else if (bms_is_subset(relids, rterm->relids))
 						add = false;
 				}
@@ -2432,7 +2432,7 @@ multiply_terms(Query *query, List *terms1, List *terms2, Node* qual,
 				{
 					Relids relids = (Relids) lfirst(lc);
 					if (bms_is_subset(lterm->relids, relids))
-						anti_relids_l = list_delete_cell(anti_relids_l, lc);
+						anti_relids_l = foreach_delete_current(anti_relids_l, lc);
 					else if (bms_is_subset(relids, lterm->relids))
 						add = false;
 				}
@@ -4831,18 +4831,11 @@ clean_up_IVM_hash_entry(MV_TriggerHashEntry *entry, bool is_abort,
 			remove_entry = true;
 		else
 		{
-			foreach(lc, entry->subxids)
-			{
-				/* Note:
-				 * PG16 or later has lfirst_xid, but we use lfirst_int for
-				 * supporting older PGs since there is no problem or now.
-				 */
-				if (lfirst_int(lc) == subxid)
-				{
-					entry->subxids = list_delete_cell(entry->subxids, lc);
-					break;
-				}
-			}
+			/* Note:
+			 * PG16 or later has list_delete_oid, but we use list_delete_int
+			 * for supporting older PGs since there is no problem or now.
+			 */
+			entry->subxids = list_delete_int(entry->subxids, subxid);
 
 			/*
 			 * If all the subxid are removed, it means that the view was not
