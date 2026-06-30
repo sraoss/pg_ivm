@@ -1838,7 +1838,12 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 			return;
 	}
 
-	address = DefineIndex(RelationGetRelid(matviewRel),
+	address = DefineIndex(
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 190000)
+						  NULL,	/* pstate; no parse state for this
+								 * internally generated index */
+#endif
+						  RelationGetRelid(matviewRel),
 						  index,
 						  InvalidOid,
 						  InvalidOid,
