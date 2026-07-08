@@ -4201,7 +4201,7 @@ insert_dangling_tuples(List *terms, Query *query,
 			 */
 			if (bms_is_subset(tle_relids, term->relids))
 				appendStringInfo(&targetlist, "%s%s", targetlist.len ? "," : "", resname);
-			
+
 			bms_free(tle_relids);
 		}
 
@@ -4892,22 +4892,30 @@ setLastUpdateXid(Oid immv_oid, FullTransactionId xid)
 								  true, NULL, 1, &key);
 	tup = systable_getnext(scan);
 
-	memset(values, 0, sizeof(values));
-	values[Anum_pg_ivm_immv_lastivmupdate -1 ] = FullTransactionIdGetDatum(xid);
-	MemSet(nulls, false, sizeof(nulls));
-	MemSet(replaces, false, sizeof(replaces));
-	replaces[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
-
-	newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
-
-	CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
-	heap_freetuple(newtup);
-
 	/*
-	 * Advance command counter to make the updated pg_ivm_immv row locally
-	 * visible.
+	 * Update the transaction ID if the catalog has an entry for the view.
+	 * If the view has been dropped in the same transaction in which it was
+	 * maintained, the entry no longer exists.
 	 */
-	CommandCounterIncrement();
+	if (HeapTupleIsValid(tup))
+	{
+		memset(values, 0, sizeof(values));
+		values[Anum_pg_ivm_immv_lastivmupdate -1 ] = FullTransactionIdGetDatum(xid);
+		MemSet(nulls, false, sizeof(nulls));
+		MemSet(replaces, false, sizeof(replaces));
+		replaces[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
+
+		newtup = heap_modify_tuple(tup, tupdesc, values, nulls, replaces);
+
+		CatalogTupleUpdate(pgIvmImmv, &newtup->t_self, newtup);
+		heap_freetuple(newtup);
+
+		/*
+		 * Advance command counter to make the updated pg_ivm_immv row locally
+		 * visible.
+		 */
+		CommandCounterIncrement();
+	}
 
 	systable_endscan(scan);
 	table_close(pgIvmImmv, ShareRowExclusiveLock);

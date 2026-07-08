@@ -481,7 +481,7 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		ScanKeyData key;
 		HeapTuple tup;
 		Oid pgIvmImmvOid = PgIvmImmvRelationId();
-	
+
 		Oid pgIvmImmvPkOid = PgIvmImmvPrimaryKeyIndexId();
 
 		/*
@@ -492,7 +492,7 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		 */
 		if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
 			return;
-		
+
 		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
 		ScanKeyInit(&key,
 					Anum_pg_ivm_immv_immvrelid,
