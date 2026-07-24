@@ -4966,6 +4966,15 @@ getLastUpdateXid(Oid immv_oid)
 	if (!isnull)
 		xid = DatumGetFullTransactionId(datum);
 
+	/*
+	 * Only one tuple should match because of the primary key. Calling
+	 * systable_getnext() once more to confirm that no additional tuples are
+	 * visible triggers an RW-conflict check under SERIALIZABLE, improving the
+	 * stability of the isolation test.
+	 */
+	tup = systable_getnext(scan);
+	Assert(!HeapTupleIsValid(tup));
+
 	systable_endscan(scan);
 	table_close(pgIvmImmv, NoLock);
 
