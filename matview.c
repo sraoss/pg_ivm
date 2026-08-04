@@ -215,6 +215,7 @@ static RangeTblEntry *get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *tabl
 				 QueryEnvironment *queryEnv, Oid matviewid);
 static RangeTblEntry *makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 									 bool is_new, QueryEnvironment *queryEnv);
+static bool has_type_without_default_eqop(Relation rel);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
 static List *get_normalized_form(Query *query, Node *jtnode, Relids outer_join_rels,
@@ -1723,6 +1724,9 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	static char *subquery_tl;
 	int i;
 
+	int num_union = list_length(table->old_rtes);
+	int num_except = list_length(table->new_rtes);
+
 	pstate = make_parsestate(NULL);
 	pstate->p_queryEnv = queryEnv;
 
@@ -1749,31 +1753,59 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	 * Also, add a pseudo ctid to ENR using row_number(), which is required for
 	 * calculating the number of dangling tuples to be inserted into
 	 * the outer join view.
+	 *
+	 * Use EXCEPT ALL to cancel out rows common to both NEW and OLD transition
+	 * tables. If the table containts a type without a default equality operator,
+	 * tuples are cast to text before performing the set operations and then cast
+	 * back to the original row type afterward.
 	 */
-	if (list_length(table->old_tuplestores) > 0)
+	if (num_union > 0)
 	{
+		bool	no_default_eqop = has_type_without_default_eqop(table->rel);
+		char *aliasname = rte->alias ? rte->alias->aliasname : RelationGetRelationName(table->rel);
+
 		appendStringInfo(&str," UNION ALL SELECT %s, "
 			" (pg_catalog.row_number() over())::text AS ctid"
 			" FROM (",
 			subquery_tl);
 
-		for (i = 0; i < list_length(table->old_tuplestores); i++)
+		if (no_default_eqop && num_except > 0)
+			appendStringInfo(&str, "SELECT (t::%s).* FROM (", relname);
+
+		for (i = 0; i < num_union; i++)
 		{
+			char *union_table_name = make_delta_enr_name("old", table->table_id, i);
+
 			if (i != 0)
 				appendStringInfo(&str, " UNION ALL ");
-			appendStringInfo(&str," TABLE %s",
-				make_delta_enr_name("old", table->table_id, i));
+
+			if (no_default_eqop && num_except > 0)
+			{
+				appendStringInfo(&str,
+					" SELECT %s::text FROM %s", union_table_name, union_table_name);
+			}
+			else
+				appendStringInfo(&str, " TABLE  %s", union_table_name);
 		}
-		for (i = 0; i < list_length(table->new_tuplestores); i++)
+		for (i = 0; i < num_except; i++)
 		{
+			char *except_table_name = make_delta_enr_name("new", table->table_id, i);
+
 			appendStringInfo(&str, " EXCEPT ALL ");
-			appendStringInfo(&str," TABLE %s",
-				make_delta_enr_name("new", table->table_id, i));
+
+			if (no_default_eqop)
+			{
+				appendStringInfo(&str,
+					" SELECT %s::text FROM %s", except_table_name, except_table_name);
+			}
+			else
+				appendStringInfo(&str, " TABLE  %s", except_table_name);
 		}
-		appendStringInfo(&str,")");
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 160000)
-		appendStringInfo(&str," AS sub");
-#endif
+
+		if (no_default_eqop && num_except > 0)
+			appendStringInfo(&str,") AS sub(t)");
+
+		appendStringInfo(&str,") AS %s", aliasname);
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1856,7 +1888,7 @@ make_subquery_targetlist_from_table(MV_TriggerTable *table)
  * make_delta_enr_name
  *
  * Make a name for ENR of a transition table from the base table's oid.
- * prefix will be "new" or "old" depending on its transition table kind..
+ * prefix will be "new" or "old" depending on its transition table kind.
  */
 static char*
 make_delta_enr_name(const char *prefix, Oid relid, int count)
@@ -1890,6 +1922,12 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	int num_union = is_new ? list_length(table->new_rtes) : list_length(table->old_rtes);
 	int num_except = is_new ? list_length(table->old_rtes) : list_length(table->new_rtes);
 
+	bool	no_default_eqop = has_type_without_default_eqop(table->rel);
+	char *aliasname = rte->alias ? rte->alias->aliasname : RelationGetRelationName(table->rel);
+	char *relname = quote_qualified_identifier(
+					get_namespace_name(RelationGetNamespace(table->rel)),
+									   RelationGetRelationName(table->rel));
+
 	/* the previous RTE must be a subquery which represents "pre-state" table */
 	Assert(rte->rtekind == RTE_SUBQUERY);
 
@@ -1901,35 +1939,57 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	 * Add a pseudo ctid to ENR using row_number(), which is required for
 	 * calculating the number of dangling tuples to be inserted into
 	 * the outer join view.
+	 *
+	 * Use EXCEPT ALL to cancel out rows common to both NEW and OLD transition
+	 * tables. If the table containts a type without a default equality operator,
+	 * tuples are cast to text before performing the set operations and then cast
+	 * back to the original row type afterward.
 	 */
 	initStringInfo(&str);
+
 	appendStringInfo(&str,
 		" SELECT %s,  "
 		" (pg_catalog.row_number() over())::text AS ctid"
 		" FROM (",
 		make_subquery_targetlist_from_table(table));
 
+	if (no_default_eqop && num_except > 0)
+		appendStringInfo(&str, "SELECT (t::%s).* FROM (", relname);
+
 	for (i = 0; i < num_union; i++)
 	{
+		char *union_table_name = make_delta_enr_name(prefix_union, table->table_id, i);
+
 		if (i > 0)
 			appendStringInfo(&str, " UNION ALL ");
 
-		appendStringInfo(&str,
-			" TABLE  %s",
-			make_delta_enr_name(prefix_union, table->table_id, i));
+		if (no_default_eqop && num_except > 0)
+		{
+			appendStringInfo(&str,
+				" SELECT %s::text FROM %s", union_table_name, union_table_name);
+		}
+		else
+			appendStringInfo(&str, " TABLE  %s", union_table_name);
 	}
 	for (i = 0; i < num_except; i++)
 	{
+		char *except_table_name = make_delta_enr_name(prefix_except, table->table_id, i);
+
 		appendStringInfo(&str, " EXCEPT ALL ");
 
-		appendStringInfo(&str,
-			" TABLE  %s",
-			make_delta_enr_name(prefix_except, table->table_id, i));
+		if (no_default_eqop)
+		{
+			appendStringInfo(&str,
+				" SELECT %s::text FROM %s", except_table_name, except_table_name);
+		}
+		else
+			appendStringInfo(&str, " TABLE  %s", except_table_name);
 	}
-	appendStringInfo(&str,")");
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 160000)
-	appendStringInfo(&str," AS sub");
-#endif
+
+	if (no_default_eqop && num_except > 0)
+		appendStringInfo(&str,") AS sub(t)");
+
+	appendStringInfo(&str,") AS %s", aliasname);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
@@ -1947,6 +2007,32 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	rte->subquery = sub;
 
 	return rte;
+}
+
+/*
+ * Check whether a table contains a type that does not have a default
+ * equality operator for EXCEPT.
+ */
+static bool
+has_type_without_default_eqop(Relation rel)
+{
+	int			attrnum;
+
+	for (attrnum = 0; attrnum < rel->rd_att->natts; attrnum++)
+	{
+		Form_pg_attribute att = TupleDescAttr(rel->rd_att, attrnum);
+		TypeCacheEntry *typentry;
+
+		if (att->attisdropped)
+			continue;
+
+		typentry = lookup_type_cache(att->atttypid, TYPECACHE_EQ_OPR_FINFO);
+
+		if (!OidIsValid(typentry->eq_opr_finfo.fn_oid))
+			return true;
+
+	}
+	return false;
 }
 
 /*

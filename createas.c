@@ -1000,7 +1000,6 @@ check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context)
 						Oid		atttype = exprType((Node *) tle->expr);
 						Oid		opclass;
 
-
 						opclass = GetDefaultOpClass(atttype, BTREE_AM_OID);
 						if (!OidIsValid(opclass))
 							ereport(ERROR,

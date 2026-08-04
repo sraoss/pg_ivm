@@ -714,6 +714,16 @@ CREATE TABLE table_json (j json);
 SELECT pgivm.create_immv('mv_json', 'SELECT * from table_json');
 ROLLBACK;
 
+BEGIN;
+CREATE TABLE table_json (i int, j json);
+SELECT pgivm.create_immv('mv_json', 'SELECT i, j->>''label'' AS label FROM table_json');
+INSERT INTO table_json VALUES (1, '{"label":"a"}'), (2, '{"label":"b"}');
+SELECT * FROM mv_json ORDER BY 1;
+UPDATE table_json SET j = '{"label":"A"}' WHERE i = 1;
+DELETE FROM table_json WHERE i = 2;
+SELECT * FROM mv_json ORDER BY 1;
+ROLLBACK;
+
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
 UPDATE  mv_ivm_1 SET k = 1 WHERE i = 1;

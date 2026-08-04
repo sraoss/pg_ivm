@@ -1762,6 +1762,34 @@ CREATE TABLE table_json (j json);
 SELECT pgivm.create_immv('mv_json', 'SELECT * from table_json');
 ERROR:  data type json has no default operator class for access method "btree"
 ROLLBACK;
+BEGIN;
+CREATE TABLE table_json (i int, j json);
+SELECT pgivm.create_immv('mv_json', 'SELECT i, j->>''label'' AS label FROM table_json');
+NOTICE:  could not create an index on immv "mv_json" automatically
+DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           0
+(1 row)
+
+INSERT INTO table_json VALUES (1, '{"label":"a"}'), (2, '{"label":"b"}');
+SELECT * FROM mv_json ORDER BY 1;
+ i | label 
+---+-------
+ 1 | a
+ 2 | b
+(2 rows)
+
+UPDATE table_json SET j = '{"label":"A"}' WHERE i = 1;
+DELETE FROM table_json WHERE i = 2;
+SELECT * FROM mv_json ORDER BY 1;
+ i | label 
+---+-------
+ 1 | A
+(1 row)
+
+ROLLBACK;
 -- prevent IMMV chanages
 INSERT INTO mv_ivm_1 VALUES(1,1,1);
 ERROR:  cannot change materialized view "mv_ivm_1"
