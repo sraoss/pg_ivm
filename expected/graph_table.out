@@ -1,0 +1,5 @@
+-- property graph is not supported
+CREATE TABLE v (i int PRIMARY KEY);
+CREATE PROPERTY GRAPH mygraph VERTEX TABLES (v);
+SELECT pgivm.create_immv('mv', 'SELECT * FROM GRAPH_TABLE (mygraph MATCH (v) COLUMNS (v.i))');
+ERROR:  property graph is not supported on incrementally maintainable materialized view

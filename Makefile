@@ -27,6 +27,10 @@ REGRESS = pg_ivm create_immv refresh_immv outer_join
 
 PGVER = $(shell $(PG_CONFIG) --version | sed "s/^[^ ]* \([0-9]*\).*$$/\1/" 2>/dev/null)
 
+ifeq ($(shell awk 'BEGIN {print ($(PGVER) >= 19) ? 1 : 0}'), 1)
+REGRESS += graph_table
+endif
+
 # We assume PG13 is the only version that is supported by pg_ivm but
 # missing pg_isolation_regress.
 
