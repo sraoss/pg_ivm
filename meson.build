@@ -1,4 +1,7 @@
-project('pg_ivm', ['c'])
+project('pg_ivm',
+  ['c'],
+  version: '1.15'
+)
 
 pg_config = find_program('pg_config')
 
@@ -8,6 +11,19 @@ includedir = run_command(pg_config, '--includedir', check: true).stdout().strip(
 pkglibdir = run_command(pg_config, '--pkglibdir', check: true).stdout().strip()
 sharedir = run_command(pg_config, '--sharedir', check: true).stdout().strip()
 libdir = run_command(pg_config, '--libdir', check: true).stdout().strip()
+version = run_command(pg_config, '--version', check: true).stdout().strip()
+
+pg_version = version.split(' ')[1]
+
+if pg_version.endswith('devel')
+  pgver = pg_version.split('devel')[0].to_int()
+elif pg_version.contains('beta')
+  pgver = pg_version.split('beta')[0].to_int()
+elif pg_version.contains('rc')
+  pgver = pg_version.split('rc')[0].to_int()
+else
+  pgver = pg_version.split('.')[0].to_int()
+endif
 
 module_name = meson.project_name()
 
@@ -73,6 +89,9 @@ pg_regress = find_program('pg_regress',
 )
 
 regress_tests = ['pg_ivm', 'create_immv', 'refresh_immv', 'outer_join']
+if pgver >= 19
+  regress_tests += ['graph_table']
+endif
 
 test('regress',
  pg_regress,
@@ -95,10 +114,12 @@ isolation_opts = [
   '--load-extension','pg_ivm',
 ]
 
-test('isolation',
- pg_isolation_regress,
- args: ['--bindir', bindir,
-        '--inputdir', meson.current_source_dir(),
-        '--outputdir', 'output_iso',
-       ] + isolation_opts + isolation_tests,
-)
+if pgver >= 14
+  test('isolation',
+   pg_isolation_regress,
+   args: ['--bindir', bindir,
+          '--inputdir', meson.current_source_dir(),
+          '--outputdir', 'output_iso',
+         ] + isolation_opts + isolation_tests,
+  )
+endif

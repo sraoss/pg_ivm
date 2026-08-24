@@ -2,7 +2,7 @@
 
 The `pg_ivm` module provides Incremental View Maintenance (IVM) feature for PostgreSQL.
 
-The extension is compatible with PostgreSQL 13, 14, 15, 16, 17, and 18.
+The extension is compatible with PostgreSQL 13, 14, 15, 16, 17, 18, and 19.
 
 ## Description
 
@@ -64,7 +64,7 @@ To install `pg_ivm`, execute this in the module's directory:
 make install
 ```
 
-If you installed PostgreSQL from rpm or deb, you will need the devel package (for example, postgresql14-devel or postgresql-server-dev-14).
+If you installed PostgreSQL from rpm or deb, you will need the devel package (for example, postgresql19-devel or postgresql-server-dev-19).
 
 > **Important:** Don't forget to set the `PG_CONFIG` variable (`make PG_CONFIG=...`) or the `PATH` to the `pg_config` command in case you want to use `pg_ivm` on a non-default or custom build of PostgreSQL. Read more [here](https://wiki.postgresql.org/wiki/Building_and_Installing_PostgreSQL_Extension_Modules).
 
@@ -394,7 +394,7 @@ test=# SELECT immvrelid AS immv, pgivm.get_immv_def(immvrelid) AS immv_def FROM 
 
 Currently, IMMV's view definition can contain inner and outer joins, DISTINCT clause, some built-in aggregate functions, simple sub-queries in `FROM` clause, EXISTS sub-queries, and simple CTE (`WITH` query). Inner joins including self-join are supported. Supported aggregate functions are count, sum, avg, min and max. Other aggregates, sub-queries which contain an aggregate or `DISTINCT` clause, sub-queries in other than `FROM` clause, window functions, `HAVING`, `ORDER BY`, `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`, `DISTINCT ON`, `TABLESAMPLE`, `VALUES`, and `FOR UPDATE`/`SHARE` can not be used in view definition.
 
-The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, and foreign tables can not be used.
+The base tables must be simple tables. Views, materialized views, inheritance parent tables, partitioned tables, partitions, foreign tables, property graph tables can not be used.
 
 Any system column cannot be included in the view definition query.
 The target list cannot columns whose name starts with `__ivm_`.
