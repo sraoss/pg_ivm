@@ -9,17 +9,22 @@ refresh_immv
 (1 row)
 
 step s2: SELECT;
-step insert: INSERT INTO a VALUES (2);
-ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step insert: INSERT INTO a VALUES (2); <waiting ...>
 step c1: COMMIT;
+step insert: <... completed>
 step check2: SELECT check_mv();
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+check_mv
+--------
+ok      
+(1 row)
+
 step c2: COMMIT;
 step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
 x|y
 -+-
 1|1
-(1 row)
+2|2
+(2 rows)
 
 check_mv
 --------
@@ -67,17 +72,22 @@ refresh_immv
            1
 (1 row)
 
-step insert: INSERT INTO a VALUES (2);
-ERROR:  could not obtain lock on materialized view "mv" during incremental maintenance
+step insert: INSERT INTO a VALUES (2); <waiting ...>
 step c1: COMMIT;
+step insert: <... completed>
 step check2: SELECT check_mv();
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+check_mv
+--------
+ok      
+(1 row)
+
 step c2: COMMIT;
 step mv: SELECT * FROM mv ORDER BY 1,2; SELECT check_mv();
 x|y
 -+-
 1|1
-(1 row)
+2|2
+(2 rows)
 
 check_mv
 --------
