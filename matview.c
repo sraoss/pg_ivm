@@ -1743,7 +1743,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	initStringInfo(&str);
 	appendStringInfo(&str,
 		"SELECT %s, ctid::text FROM %s t"
-		" WHERE pgivm.ivm_visible_in_prestate(t.tableoid, t.ctid, %d::pg_catalog.oid)",
+		" WHERE pgivm.ivm_visible_in_prestate(t.tableoid, t.ctid, %u::pg_catalog.oid)",
 			subquery_tl, relname, matviewid);
 
 	/*
