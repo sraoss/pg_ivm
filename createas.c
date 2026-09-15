@@ -79,7 +79,7 @@ typedef struct
 } check_ivm_restriction_context;
 
 static void CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
-									 Relids *relids, bool ex_lock);
+									 List **relids, bool ex_lock);
 static void CreateIvmTrigger(Oid relOid, Oid viewOid, int16 type, int16 timing, bool ex_lock);
 static void check_ivm_restriction(Node *node);
 static bool check_ivm_restriction_walker(Node *node, check_ivm_restriction_context *context);
@@ -673,7 +673,7 @@ makeIvmAggColumn(ParseState *pstate, Aggref *aggref, char *resname, AttrNumber *
 void
 CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid)
 {
-	Relids	relids = NULL;
+	List   *relids = NIL;
 	bool	ex_lock = false;
 	RangeTblEntry *rte;
 
@@ -707,12 +707,12 @@ CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid)
 
 	CreateIvmTriggersOnBaseTablesRecurse(qry, (Node *)qry, matviewOid, &relids, ex_lock);
 
-	bms_free(relids);
+	list_free(relids);
 }
 
 static void
 CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
-									 Relids *relids, bool ex_lock)
+									 List  **relids, bool ex_lock)
 {
 	if (node == NULL)
 		return;
@@ -742,7 +742,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 				int			rti = ((RangeTblRef *) node)->rtindex;
 				RangeTblEntry *rte = rt_fetch(rti, qry->rtable);
 
-				if (rte->rtekind == RTE_RELATION && !bms_is_member(rte->relid, *relids))
+				if (rte->rtekind == RTE_RELATION && !list_member_oid(*relids, rte->relid))
 				{
 					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_BEFORE, ex_lock);
 					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_BEFORE, ex_lock);
@@ -753,7 +753,7 @@ CreateIvmTriggersOnBaseTablesRecurse(Query *qry, Node *node, Oid matviewOid,
 					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_UPDATE, TRIGGER_TYPE_AFTER, ex_lock);
 					CreateIvmTrigger(rte->relid, matviewOid, TRIGGER_TYPE_TRUNCATE, TRIGGER_TYPE_AFTER, true);
 
-					*relids = bms_add_member(*relids, rte->relid);
+					*relids = lappend_oid(*relids, rte->relid);
 				}
 				else if (rte->rtekind == RTE_SUBQUERY)
 				{
