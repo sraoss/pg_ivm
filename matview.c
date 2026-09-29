@@ -4856,7 +4856,7 @@ AtAbort_IVM(SubTransactionId subxid)
  * into the pg_ivm_immv catalog at transaction commit.
  */
 void
-AtPreCommit_IVM()
+AtPreCommit_IVM(void)
 {
 	HASH_SEQ_STATUS seq;
 	MV_TriggerHashEntry *entry;
