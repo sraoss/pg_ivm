@@ -469,6 +469,43 @@ DELETE FROM base_t WHERE v = 5;
 SELECT * FROM mv ORDER BY i;
 ROLLBACK;
 
+-- views with key columns declared NOT NULL
+BEGIN;
+CREATE TABLE base_t (i int, j int, v int);
+INSERT INTO base_t VALUES (1, 10, 1), (1, 20, 2), (2, 10, 3), (2, 20, 4);
+SELECT pgivm.create_immv('mv', 'SELECT i, j, sum(v), count(*), min(v), max(v) FROM base_t GROUP BY i, j');
+ALTER TABLE mv ALTER COLUMN i SET NOT NULL, ALTER COLUMN j SET NOT NULL;
+INSERT INTO base_t VALUES (1, 10, 10), (3, 30, 30);
+SELECT * FROM mv ORDER BY i, j;
+UPDATE base_t SET v = v * 10 WHERE i = 1;
+SELECT * FROM mv ORDER BY i, j;
+DELETE FROM base_t WHERE v IN (3, 10, 30);
+SELECT * FROM mv ORDER BY i, j;
+ROLLBACK;
+
+-- only some of the key columns are declared NOT NULL
+BEGIN;
+CREATE TABLE base_t (i int, j int, v int);
+INSERT INTO base_t VALUES (1, 10, 1), (1, NULL, 2), (2, NULL, 3);
+SELECT pgivm.create_immv('mv', 'SELECT i, j, sum(v), count(*) FROM base_t GROUP BY i, j');
+ALTER TABLE mv ALTER COLUMN i SET NOT NULL;
+INSERT INTO base_t VALUES (1, NULL, 20), (2, 10, 30);
+SELECT * FROM mv ORDER BY i, j;
+DELETE FROM base_t WHERE j IS NULL AND v IN (2, 3);
+SELECT * FROM mv ORDER BY i, j;
+ROLLBACK;
+
+-- all columns are used as keys in views without aggregates
+BEGIN;
+CREATE TABLE base_t (i int, v int);
+INSERT INTO base_t VALUES (1, 10), (1, 10), (2, 20);
+SELECT pgivm.create_immv('mv', 'SELECT i, v FROM base_t');
+ALTER TABLE mv ALTER COLUMN i SET NOT NULL, ALTER COLUMN v SET NOT NULL;
+DELETE FROM base_t WHERE ctid = (SELECT ctid FROM base_t WHERE i = 1 LIMIT 1);
+UPDATE base_t SET v = 200 WHERE i = 2;
+SELECT * FROM mv ORDER BY i, v;
+ROLLBACK;
+
 -- IMMV containing user defined type
 BEGIN;
 
