@@ -55,7 +55,7 @@ install_data(
   'pg_ivm--1.4--1.5.sql',
   'pg_ivm--1.5--1.6.sql',
   'pg_ivm--1.6--1.7.sql',
-  'pg_ivm--1.7--1.8.sql', 
+  'pg_ivm--1.7--1.8.sql',
   'pg_ivm--1.8--1.9.sql',
   'pg_ivm--1.9--1.10.sql',
   'pg_ivm--1.10.sql',
@@ -64,9 +64,10 @@ install_data(
   'pg_ivm--1.12--1.13.sql',
   'pg_ivm--1.13--1.14.sql',
   'pg_ivm--1.14--1.15.sql',
+  'pg_ivm--1.15--1.16.sql',
   'pg_ivm.control',
   install_dir: sharedir / 'extension',
-) 
+)
 
 pg_regress = find_program('pg_regress',
   dirs: [pkglibdir / 'pgxs/src/test/regress']

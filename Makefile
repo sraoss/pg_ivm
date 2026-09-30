@@ -20,7 +20,7 @@ DATA = pg_ivm--1.0.sql \
        pg_ivm--1.9--1.10.sql \
        pg_ivm--1.10.sql \
        pg_ivm--1.10--1.11.sql pg_ivm--1.11--1.12.sql pg_ivm--1.12--1.13.sql \
-       pg_ivm--1.13--1.14.sql pg_ivm--1.14--1.15.sql
+       pg_ivm--1.13--1.14.sql pg_ivm--1.14--1.15.sql pg_ivm--1.15--1.16.sql
 SCRIPTS = scripts/pg_ivm_dump_metadata
 
 REGRESS = pg_ivm create_immv refresh_immv outer_join
