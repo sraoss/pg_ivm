@@ -827,14 +827,23 @@ IVM_immediate_before(PG_FUNCTION_ARGS)
 	{
 		FullTransactionId xid;
 
-    /* XXX: dead-lock is possible here. */
-    LockRelationOid(matviewOid, ExclusiveLock);
+		/*
+		 * Wait for concurrent transactions which update this materialized view.
+		 * This is needed to see changes committed in other transactions at
+		 * READ COMMITTED. At REPEATABLE READ or SERIALIZABLE, concurrent
+		 * maintenance of the view while waiting for the lock could cause an
+		 * anomaly, but it would be detected after the lock is acquired.
+		 *
+		 * XXX: dead-lock is possible here.
+		 */
+
+		LockRelationOid(matviewOid, ExclusiveLock);
 
 		/*
 		 * Even if we can acquire an lock, a concurrent transaction could have
-		 * updated the view incrementally and been committed before we acquired
+		 * updated the view incrementally and committed before we acquired
 		 * the lock. Therefore, we have to check the transaction ID of the most
-		 * recent update of the view, and if this was in progress at the
+		 * recent update of the view, and if it was in progress at the
 		 * transaction start, raise an error to prevent anomalies.
 		 */
 		xid = getLastUpdateXid(matviewOid);
