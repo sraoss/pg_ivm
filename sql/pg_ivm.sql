@@ -680,6 +680,33 @@ INSERT INTO tbl_self_ref VALUES (1, null), (2, 1), (3, 2);
 SELECT pgivm.create_immv('mv_self_ref', 'SELECT * FROM tbl_self_ref');
 UPDATE tbl_self_ref set a = a + 10;
 SELECT * FROM mv_self_ref ORDER BY a;
+
+-- self-referential FKs with ON UPDATE SET NULL
+CREATE TABLE tbl_self_ref_null (a int primary key,
+								b int references tbl_self_ref_null(a) ON UPDATE SET NULL);
+INSERT INTO tbl_self_ref_null VALUES (1, null), (2, 1), (3, 2);
+SELECT pgivm.create_immv('mv_self_ref_null', 'SELECT * FROM tbl_self_ref_null');
+UPDATE tbl_self_ref_null set a = a + 10;
+SELECT * FROM mv_self_ref_null ORDER BY a;
+
+-- self-referential FKs with ON DELETE CASCADE, which only delete rows
+CREATE TABLE tbl_self_ref_del (a int primary key,
+							   b int references tbl_self_ref_del(a) ON DELETE CASCADE);
+INSERT INTO tbl_self_ref_del VALUES (1, null), (2, 1), (3, 2), (4, null);
+SELECT pgivm.create_immv('mv_self_ref_del', 'SELECT * FROM tbl_self_ref_del');
+DELETE FROM tbl_self_ref_del WHERE a = 1;
+SELECT * FROM mv_self_ref_del ORDER BY a;
+UPDATE tbl_self_ref_del SET b = 4;
+SELECT * FROM mv_self_ref_del ORDER BY a;
+
+-- single statements on a table with a json column, including a no-op update
+CREATE TABLE tbl_json_single (i int, j json);
+INSERT INTO tbl_json_single VALUES (1, '{"a": 1}'), (2, '{"a": 2}');
+SELECT pgivm.create_immv('mv_json_single', 'SELECT i, count(*) FROM tbl_json_single GROUP BY i');
+UPDATE tbl_json_single SET i = i + 10 WHERE i = 1;
+UPDATE tbl_json_single SET i = i;
+DELETE FROM tbl_json_single WHERE i = 2;
+SELECT * FROM mv_json_single ORDER BY i;
 ROLLBACK;
 
 -- automatic index creation

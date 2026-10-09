@@ -19,6 +19,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/heap.h"
 #include "catalog/pg_collation_d.h"
+#include "catalog/pg_constraint.h"
 #include "catalog/pg_trigger.h"
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 190000)
 #include "commands/repack.h"	/* commands/cluster.h was renamed to
@@ -61,6 +62,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#include "utils/syscache.h"
 #include "utils/typcache.h"
 #include "utils/xid8.h"
 
@@ -143,6 +145,8 @@ typedef struct MV_TriggerTable
 	List   *new_tuplestores;	/* tuplestores for inserted tuples */
 	List   *old_rtes;			/* RTEs of ENRs for old_tuplestores*/
 	List   *new_rtes;			/* RTEs of ENRs for new_tuplestores */
+	int		num_events;			/* number of AFTER trigger calls that saved
+								 * transition tables */
 
 	List   *rte_paths;			/* List of paths to RTE index of the modified table */
 	RangeTblEntry *original_rte;	/* the original RTE saved before rewriting query */
@@ -216,6 +220,7 @@ static RangeTblEntry *get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *tabl
 static RangeTblEntry *makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 									 bool is_new, QueryEnvironment *queryEnv);
 static bool has_type_without_default_eqop(Relation rel);
+static bool delta_needs_cancellation(MV_TriggerTable *table);
 static Query *rewrite_query_for_distinct_and_aggregates(Query *query, ParseState *pstate);
 
 static List *get_normalized_form(Query *query, Node *jtnode, Relids outer_join_rels,
@@ -996,6 +1001,7 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		table->new_tuplestores = NIL;
 		table->old_rtes = NIL;
 		table->new_rtes = NIL;
+		table->num_events = 0;
 		table->rte_paths = NIL;
 		table->slot = MakeSingleTupleTableSlot(RelationGetDescr(rel), table_slot_callbacks(rel));
 		/* We assume we have at least RowExclusiveLock on modified tables. */
@@ -1020,6 +1026,8 @@ IVM_immediate_maintenance(PG_FUNCTION_ARGS)
 		entry->has_new = true;
 		MemoryContextSwitchTo(oldcxt);
 	}
+	if (trigdata->tg_oldtable || trigdata->tg_newtable)
+		table->num_events++;
 
 	/* If this is not the last AFTER trigger call, immediately exit. */
 	Assert (entry->before_trig_count >= entry->after_trig_count);
@@ -1712,7 +1720,8 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	int i;
 
 	int num_union = list_length(table->old_rtes);
-	int num_except = list_length(table->new_rtes);
+	int num_except = delta_needs_cancellation(table) ?
+		list_length(table->new_rtes) : 0;
 
 	pstate = make_parsestate(NULL);
 	pstate->p_queryEnv = queryEnv;
@@ -1744,11 +1753,12 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 	 * Use EXCEPT ALL to cancel out rows common to both NEW and OLD transition
 	 * tables. If the table containts a type without a default equality operator,
 	 * tuples are cast to text before performing the set operations and then cast
-	 * back to the original row type afterward.
+	 * back to the original row type afterward. This is skipped when no row can
+	 * be in both of them; see delta_needs_cancellation().
 	 */
 	if (num_union > 0)
 	{
-		bool	no_default_eqop = has_type_without_default_eqop(table->rel);
+		bool	no_default_eqop = num_except > 0 && has_type_without_default_eqop(table->rel);
 		char *aliasname = rte->alias ? rte->alias->aliasname : RelationGetRelationName(table->rel);
 
 		appendStringInfo(&str," UNION ALL SELECT %s, "
@@ -1907,9 +1917,10 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	const char *prefix_union = is_new ? "new" : "old";
 	const char *prefix_except = is_new ? "old" : "new";
 	int num_union = is_new ? list_length(table->new_rtes) : list_length(table->old_rtes);
-	int num_except = is_new ? list_length(table->old_rtes) : list_length(table->new_rtes);
+	int num_except = !delta_needs_cancellation(table) ? 0 :
+		(is_new ? list_length(table->old_rtes) : list_length(table->new_rtes));
 
-	bool	no_default_eqop = has_type_without_default_eqop(table->rel);
+	bool	no_default_eqop = num_except > 0 && has_type_without_default_eqop(table->rel);
 	char *aliasname = rte->alias ? rte->alias->aliasname : RelationGetRelationName(table->rel);
 	char *relname = quote_qualified_identifier(
 					get_namespace_name(RelationGetNamespace(table->rel)),
@@ -1930,7 +1941,8 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	 * Use EXCEPT ALL to cancel out rows common to both NEW and OLD transition
 	 * tables. If the table containts a type without a default equality operator,
 	 * tuples are cast to text before performing the set operations and then cast
-	 * back to the original row type afterward.
+	 * back to the original row type afterward. This is skipped when no row can
+	 * be in both of them; see delta_needs_cancellation().
 	 */
 	initStringInfo(&str);
 
@@ -2019,6 +2031,61 @@ has_type_without_default_eqop(Relation rel)
 			return true;
 
 	}
+	return false;
+}
+
+/*
+ * delta_needs_cancellation
+ *
+ * Check whether a row can appear in both the NEW and OLD transition tables of
+ * the modified table, so that the EXCEPT ALL in makeDeltaTable() and
+ * get_prestate_rte() is required.
+ *
+ * This happens when the table is modified more than once in a statement.
+ * Each statement executed by a user-defined trigger fires our AFTER trigger
+ * again, so it is counted in num_events. Referential actions are executed
+ * without firing triggers, so their changes are added to the transition
+ * tables of the outer statement. Therefore a table that has a foreign key
+ * whose action can update it (ON UPDATE CASCADE, SET NULL or SET DEFAULT)
+ * always needs the cancellation. ON DELETE CASCADE only deletes rows, which
+ * adds them to the OLD transition table alone.
+ *
+ * When no cancellation is needed, the EXCEPT ALL only costs time: it has to
+ * compare whole rows, which is expensive for wide tables, especially those
+ * that need the text cast in has_type_without_default_eqop().
+ */
+static bool
+delta_needs_cancellation(MV_TriggerTable *table)
+{
+	List	   *fkeys;
+	ListCell   *lc;
+
+	if (table->num_events > 1)
+		return true;
+
+	fkeys = RelationGetFKeyList(table->rel);
+	foreach(lc, fkeys)
+	{
+		ForeignKeyCacheInfo *fk = (ForeignKeyCacheInfo *) lfirst(lc);
+		HeapTuple	tup;
+		Form_pg_constraint con;
+		bool		can_update;
+
+		tup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(fk->conoid));
+		if (!HeapTupleIsValid(tup))
+			return true;
+		con = (Form_pg_constraint) GETSTRUCT(tup);
+
+		can_update = (con->confupdtype != FKCONSTR_ACTION_NOACTION &&
+					  con->confupdtype != FKCONSTR_ACTION_RESTRICT) ||
+					 con->confdeltype == FKCONSTR_ACTION_SETNULL ||
+					 con->confdeltype == FKCONSTR_ACTION_SETDEFAULT;
+		ReleaseSysCache(tup);
+
+		if (can_update)
+			return true;
+	}
+
 	return false;
 }
 
