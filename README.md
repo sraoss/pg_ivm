@@ -27,7 +27,7 @@ When an IMMV is created, some triggers are automatically created so that the vie
 ```sql
 postgres=# SELECT pgivm.create_immv('m', 'SELECT * FROM t0');
 NOTICE:  could not create an index on immv "m" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -105,7 +105,7 @@ pgivm.create_immv(immv text, view_definition text) RETURNS bigint
 ```
 `create_immv` defines a new IMMV of a query. A table of the name `immv_name` is created and a query specified by `view_definition` is executed and used to populate the IMMV. The query is stored in `pg_ivm_immv`, so that it can be refreshed later upon incremental view maintenance. `create_immv` returns the number of rows in the created IMMV.
 
-When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if possible.  If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
+When an IMMV is created, some triggers are automatically created so that the view's contents are immediately updated when its base tables are modified. In addition, a unique index is created on the IMMV automatically if unique keys can be derived from the view definition.  For example, if the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.
 
 `create_immv` acquires an `AccessExclusiveLock` on the view. However, even if we are able to acquire the lock, a concurrent transaction may have already incrementally updated and committed the view before we can acquire it. In the `REPEATABLE READ` or `SERIALIZABLE` isolation levels, this could lead to an inconsistent state of the view. Unfortunately, this situation cannot be detected during the creation of the view. As a result, `create_immv` raises a warning in these isolation levels, suggesting that the command be used in `READ COMMITTED` or that `refresh_immv` be executed afterward to make the view's contents remain consistent.
 
@@ -256,7 +256,7 @@ test=# SELECT * FROM immv WHERE aid = 1;
 
 An appropriate index on IMMV is necessary for efficient IVM because we need to look for tuples to be updated in IMMV.  If there are no indexes, it will take a long time.
 
-Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible. If the view definition query has a GROUP BY clause, a unique index is created on the columns of GROUP BY expressions. Also, if the view has DISTINCT clause, a unique index is created on all columns in the target list. Otherwise, if the IMMV contains all primary key attributes of its base tables in the target list, a unique index is created on these attributes.  In other cases, no index is created.
+Therefore, when an IMMV is created by the `create_immv` function, a unique index is created on it automatically if possible, for example, if the IMMV contains all primary key attributes of its base tables in the target list.
 
 In the previous example, a unique index "immv_index" is created on aid and bid columns of "immv", and this enables the rapid update of the view. Dropping this index make updating the view take a loger time.
 
