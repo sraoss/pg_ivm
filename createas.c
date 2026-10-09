@@ -1974,9 +1974,19 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 		if (IsA(tle->expr, Var))
 		{
 			Var *var = (Var*) tle->expr;
-			Bitmapset *key_attnos = list_nth(key_attnos_list, var->varno - 1);
+			Bitmapset *key_attnos;
 
-			/* check if this attribute is from a base table's primary key */
+			/*
+			 * Ignore a var from an outer query because it cannot consits of
+			 * the unique key of the query at the current level.
+			 */
+			if (var->varlevelsup > 0)
+				continue;
+
+			/*
+			 * Check if this attribute is an element of any relation's key.
+			 */
+			key_attnos = list_nth(key_attnos_list, var->varno - 1);
 			if (bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber, key_attnos))
 			{
 				/*
