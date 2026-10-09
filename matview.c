@@ -252,18 +252,19 @@ static char *get_operation_string(IvmOp op, const char *col, const char *arg1, c
 static char *get_null_condition_string(IvmOp op, const char *arg1, const char *arg2,
 						  const char* count_col);
 static void apply_old_delta(const char *matviewname, const char *deltaname_old,
-				List *keys);
+				List *keys, Relation matviewRel);
 static void apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
-				List *keys, StringInfo aggs_list, StringInfo aggs_set,
+				List *keys, Relation matviewRel, StringInfo aggs_list, StringInfo aggs_set,
 				List *minmax_list, List *is_min_list,
 				const char *count_colname,
 				SPITupleTable **tuptable_recalc, uint64 *num_recalc);
 static void apply_new_delta(const char *matviewname, const char *deltaname_new,
 				StringInfo target_list);
 static void apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
-				List *keys, StringInfo target_list, StringInfo aggs_set,
+				List *keys, Relation matviewRel, StringInfo target_list, StringInfo aggs_set,
 				const char* count_colname, bool distinct);
-static char *get_matching_condition_string(List *keys);
+static char *get_matching_condition_string(List *keys, Relation matviewRel);
+static bool is_not_null_key(Relation matviewRel, Form_pg_attribute attr);
 static char *get_returning_string(List *minmax_list, List *is_min_list, List *keys);
 static char *get_minmax_recalc_condition_string(List *minmax_list, List *is_min_list);
 static char *get_select_for_recalc_string(List *keys);
@@ -3149,11 +3150,11 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 		if (use_count)
 			/* apply old delta and get rows to be recalculated */
 			apply_old_delta_with_count(matviewname, OLD_DELTA_ENRNAME,
-									   keys, aggs_list_buf, aggs_set_old,
+									   keys, matviewRel, aggs_list_buf, aggs_set_old,
 									   minmax_list, is_min_list,
 									   count_colname, &tuptable_recalc, &num_recalc);
 		else
-			apply_old_delta(matviewname, OLD_DELTA_ENRNAME, keys);
+			apply_old_delta(matviewname, OLD_DELTA_ENRNAME, keys, matviewRel);
 
 		/*
 		 * If we have min or max, we might have to recalculate aggregate values from base tables
@@ -3196,7 +3197,7 @@ apply_delta(Oid matviewOid, Tuplestorestate *old_tuplestores, Tuplestorestate *n
 		/* apply new delta */
 		if (use_count)
 			apply_new_delta_with_count(matviewname, NEW_DELTA_ENRNAME,
-								keys, &target_list_buf, aggs_set_new, count_colname,
+								keys, matviewRel, &target_list_buf, aggs_set_new, count_colname,
 								query->distinctClause != NULL);
 		else
 			apply_new_delta(matviewname, NEW_DELTA_ENRNAME, &target_list_buf);
@@ -3556,7 +3557,7 @@ get_null_condition_string(IvmOp op, const char *arg1, const char *arg2,
  */
 static void
 apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
-				List *keys, StringInfo aggs_list, StringInfo aggs_set,
+				List *keys, Relation matviewRel, StringInfo aggs_list, StringInfo aggs_set,
 				List *minmax_list, List *is_min_list,
 				const char *count_colname,
 				SPITupleTable **tuptable_recalc, uint64 *num_recalc)
@@ -3571,7 +3572,7 @@ apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
 	Assert(num_recalc != NULL);
 
 	/* build WHERE condition for searching tuples to be deleted */
-	match_cond = get_matching_condition_string(keys);
+	match_cond = get_matching_condition_string(keys, matviewRel);
 
 	/*
 	 * We need a special RETURNING clause and SELECT statement for min/max to
@@ -3638,7 +3639,7 @@ apply_old_delta_with_count(const char *matviewname, const char *deltaname_old,
  */
 static void
 apply_old_delta(const char *matviewname, const char *deltaname_old,
-				List *keys)
+				List *keys, Relation matviewRel)
 {
 	StringInfoData	querybuf;
 	StringInfoData	keysbuf;
@@ -3646,7 +3647,7 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
 	ListCell *lc;
 
 	/* build WHERE condition for searching tuples to be deleted */
-	match_cond = get_matching_condition_string(keys);
+	match_cond = get_matching_condition_string(keys, matviewRel);
 
 	/* build string of keys list */
 	initStringInfo(&keysbuf);
@@ -3693,7 +3694,7 @@ apply_old_delta(const char *matviewname, const char *deltaname_old,
  */
 static void
 apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
-				List *keys, StringInfo target_list, StringInfo aggs_set,
+				List *keys, Relation matviewRel, StringInfo target_list, StringInfo aggs_set,
 				const char* count_colname, bool distinct)
 {
 	StringInfoData	querybuf;
@@ -3704,7 +3705,7 @@ apply_new_delta_with_count(const char *matviewname, const char* deltaname_new,
 
 
 	/* build WHERE condition for searching tuples to be updated */
-	match_cond = get_matching_condition_string(keys);
+	match_cond = get_matching_condition_string(keys, matviewRel);
 
 	/* build string of keys list */
 	initStringInfo(&returning_keys);
@@ -3795,9 +3796,10 @@ apply_new_delta(const char *matviewname, const char *deltaname_new,
  * get_matching_condition_string
  *
  * Build a predicate string for looking for a tuple with given keys.
+ * keys is a list of attributes of the view given by matviewRel.
  */
 static char *
-get_matching_condition_string(List *keys)
+get_matching_condition_string(List *keys, Relation matviewRel)
 {
 	StringInfoData match_cond;
 	ListCell	*lc;
@@ -3815,17 +3817,42 @@ get_matching_condition_string(List *keys)
 		char   *diff_resname = quote_qualified_identifier("diff", resname);
 		Oid		typid = attr->atttypid;
 
-		/* Considering NULL values, we can not use simple = operator. */
+		/*
+		 * Considering NULL values, we can not use simple = operator, unless
+		 * the key column of the view is known not to contain NULL. In that
+		 * case, the NULL test is redundant, and omitting it allows the planner
+		 * to use an index on all the key columns to look for the tuple.
+		 */
 		appendStringInfo(&match_cond, "(");
 		generate_equal(&match_cond, typid, mv_resname, diff_resname);
-		appendStringInfo(&match_cond, " OR (%s IS NULL AND %s IS NULL))",
-						 mv_resname, diff_resname);
+		if (!is_not_null_key(matviewRel, attr))
+			appendStringInfo(&match_cond, " OR (%s IS NULL AND %s IS NULL)",
+							 mv_resname, diff_resname);
+		appendStringInfo(&match_cond, ")");
 
 		if (lnext(keys, lc))
 			appendStringInfo(&match_cond, " AND ");
 	}
 
 	return match_cond.data;
+}
+
+/*
+ * is_not_null_key
+ *
+ * Return true if the key column of the view given by attr has a valid
+ * NOT NULL constraint, that is, the column is known not to contain NULL.
+ */
+static bool
+is_not_null_key(Relation matviewRel, Form_pg_attribute attr)
+{
+#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
+	/* Since PG18, a NOT NULL constraint can be NOT VALID. */
+	return TupleDescCompactAttr(RelationGetDescr(matviewRel),
+								attr->attnum - 1)->attnullability == ATTNULLABLE_VALID;
+#else
+	return attr->attnotnull;
+#endif
 }
 
 /*

@@ -269,6 +269,8 @@ UPDATE 1
 Time: 3224.741 ms (00:03.225)
 ```
 
+The columns used to look for tuples in the IMMV, such as `GROUP BY` columns, can contain NULL values, so by default the tuples are looked for using a NULL-safe condition like `(mv.a = diff.a OR (mv.a IS NULL AND diff.a IS NULL))`. When there are multiple such columns, this condition can prevent the planner from using an index on all of them. If a column never contains NULL, you can declare it with `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL`. Then, a simple equality condition is used for the column, which allows the index to be used efficiently. Note that `refresh_immv` does not check `NOT NULL` constraints of the IMMV, so declare them only on columns for which the view definition query never returns NULL.
+
 ### IMMV with Aggregate Functions
 
 You can create an IMMV that includes aggregate functions.
