@@ -306,6 +306,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 				  QueryCompletion *qc, Oid matviewOid)
 {
 	Query	   *query = castNode(Query, stmt->query);
+	Query	   *rewritten;
 	IntoClause *into = stmt->into;
 	bool		do_refresh = false;
 	ObjectAddress address;
@@ -354,7 +355,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	check_ivm_restriction((Node *) query);
 
 	/* For IMMV, we need to rewrite matview query */
-	query = rewriteQueryForIMMV(query, into->colNames);
+	rewritten = rewriteQueryForIMMV(query, into->colNames);
 
 	if (!OidIsValid(matviewOid))
 		/*
@@ -363,11 +364,11 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		 * similar to CREATE VIEW.  This avoids dump/restore problems stemming
 		 * from running the planner before all dependencies are set up.
 		 */
-		address = create_immv_nodata(query->targetList, into);
+		address = create_immv_nodata(rewritten->targetList, into);
 	else
 	{
 		/* check table compatibility */
-		check_immv_compatibility(matviewOid, query->targetList, into);
+		check_immv_compatibility(matviewOid, rewritten->targetList, into);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
 		StoreImmvQuery(matviewOid, into->viewQuery);
@@ -419,7 +420,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	{
 		Assert(OidIsValid(matviewOid));
 
-		CreateIvmTriggersOnBaseTables(query, matviewOid);
+		CreateIvmTriggersOnBaseTables(rewritten, matviewOid);
 
 		matviewRel = table_open(matviewOid, NoLock);
 
@@ -1801,8 +1802,7 @@ CreateIndexOnIMMV(Query *query, Relation matviewRel)
 			ereport(NOTICE,
 					(errmsg("could not create an index on immv \"%s\" automatically",
 							RelationGetRelationName(matviewRel)),
-					 errdetail("This target list does not have all the primary key columns, "
-							   "or this view does not contain GROUP BY or DISTINCT clause."),
+					 errdetail("No unique key could be derived from the view definition."),
 					 errhint("Create an index on the immv for efficient incremental maintenance.")));
 			return;
 		}
@@ -1896,7 +1896,14 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 	ListCell *lc;
 	int i;
 	Bitmapset *keys = NULL;
-	Relids	rels_in_from;
+	Relids	   rels_in_from;
+
+	/*
+	 * If the targetlist contains a set-returning function, the query
+	 * cannot have an unique key even if it has all all priamry key columns.
+	 */
+	if (query->hasTargetSRFs)
+		return NULL;
 
 	/* convert CTEs to subqueries */
 	query = copyObject(query);
@@ -1926,8 +1933,18 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 		/* for subqueries, scan recursively */
 		if (r->rtekind == RTE_SUBQUERY)
 		{
-			key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList);
-			has_no_pkey = (key_attnos == NULL);
+			/*
+			 * Ignore subqueries without rtable because they have only one
+			 * row geven the target list has no set-returning function.
+			 * Store NULL into key_attnos_list as a dummy.
+			 */
+			if (list_length(r->subquery->rtable) == 0)
+				key_attnos = NULL;
+			else
+			{
+				key_attnos = get_primary_key_attnos_from_query(r->subquery, constraintList);
+				has_no_pkey = (key_attnos == NULL);
+			}
 		}
 		/* for tables, call get_primary_key_attnos */
 		else if (r->rtekind == RTE_RELATION)
@@ -1974,22 +1991,36 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 		if (IsA(tle->expr, Var))
 		{
 			Var *var = (Var*) tle->expr;
-			Bitmapset *key_attnos = list_nth(key_attnos_list, var->varno - 1);
+			Bitmapset *key_attnos;
 
-			/* check if this attribute is from a base table's primary key */
+			/*
+			 * Ignore a var from an outer query because it cannot consits of
+			 * the unique key of the query at the current level.
+			 */
+			if (var->varlevelsup > 0)
+				continue;
+
+			/*
+			 * Check if this attribute is an element of any relation's key.
+			 */
+			key_attnos = list_nth(key_attnos_list, var->varno - 1);
 			if (bms_is_member(var->varattno - FirstLowInvalidHeapAttributeNumber, key_attnos))
 			{
 				/*
-				 * Remove found key attributes from key_attnos_list, and add this
-				 * to the result list.
+				 * Add found key attributes to the result, and remove from the bitmap set
+				 * which represents remaining keys we would like to find in the relatino.
+				 * If we have found all the key attributes, remove ths bitmap rom the list
+				 * and add NULL as dummy to indicate it.
 				 */
+
+				keys = bms_add_member(keys, i - FirstLowInvalidHeapAttributeNumber);
+
 				key_attnos = bms_del_member(key_attnos, var->varattno - FirstLowInvalidHeapAttributeNumber);
 				if (bms_is_empty(key_attnos))
 				{
 					key_attnos_list = list_delete_nth_cell(key_attnos_list, var->varno - 1);
 					key_attnos_list = list_insert_nth(key_attnos_list, var->varno - 1, NULL);
 				}
-				keys = bms_add_member(keys, i - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
 		i++;
@@ -2005,7 +2036,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
 	/*
 	 * Check if all key attributes of relations in FROM are appearing in the target
 	 * list.  If an attribute remains in key_attnos_list in spite of the table is used
-	 * in FROM clause, the target is missing this key attribute, so we return NULL.
+	 * in FROM clause, the target list is missing this key attribute, so we return NULL.
 	 */
 	i = 1;
 	foreach(lc, key_attnos_list)

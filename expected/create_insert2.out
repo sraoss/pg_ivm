@@ -3,7 +3,7 @@ Parsed test spec with 2 sessions
 starting permutation: s1 create s2 insert c1 check2 c2 mv
 step s1: SELECT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -47,7 +47,7 @@ ok
 starting permutation: s1 create s2 c1 insert check2 c2 mv
 step s1: SELECT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -91,7 +91,7 @@ starting permutation: s1 s2 create insert c1 check2 c2 mv
 step s1: SELECT;
 step s2: SELECT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -144,7 +144,7 @@ step create:
  <waiting ...>
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -178,7 +178,7 @@ starting permutation: s1 s2 create c1 insert check2 c2 mv
 step s1: SELECT;
 step s2: SELECT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -230,7 +230,7 @@ step create:
  <waiting ...>
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -266,7 +266,7 @@ step insert: INSERT INTO a VALUES (2);
 step s1: SELECT;
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
@@ -308,7 +308,7 @@ step s1: SELECT;
 step insert: INSERT INTO a VALUES (2);
 step c2: COMMIT;
 tx1: NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
 tx1: WARNING:  inconsistent view can be created in isolation level SERIALIZABLE or REPEATABLE READ
 DETAIL:  The view may not include effects of a concurrent transaction.
