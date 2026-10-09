@@ -21,7 +21,7 @@ INSERT INTO mv_base_b VALUES
   (4,104);
 SELECT pgivm.create_immv('mv_ivm_1', 'SELECT i,j,k FROM mv_base_a a INNER JOIN mv_base_b b USING(i)');
 NOTICE:  could not create an index on immv "mv_ivm_1" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -119,7 +119,7 @@ CREATE FUNCTION ivm_func() RETURNS int LANGUAGE 'sql'
        AS 'SELECT 1' IMMUTABLE;
 SELECT pgivm.create_immv('mv_ivm_func', 'SELECT * FROM ivm_func()');
 NOTICE:  could not create an index on immv "mv_ivm_func" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -128,7 +128,7 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
 
 SELECT pgivm.create_immv('mv_ivm_no_tbl', 'SELECT 1');
 NOTICE:  could not create an index on immv "mv_ivm_no_tbl" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -140,7 +140,7 @@ ROLLBACK;
 BEGIN;
 SELECT pgivm.create_immv('mv_ivm_duplicate', 'SELECT j FROM mv_base_a');
 NOTICE:  could not create an index on immv "mv_ivm_duplicate" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -575,7 +575,7 @@ INSERT INTO base_t VALUES (1, 10), (2, 20), (3, 30);
 SELECT pgivm.create_immv('mv_self(v1, v2)',
  'SELECT t1.v, t2.v FROM base_t AS t1 JOIN base_t AS t2 ON t1.i = t2.i');
 NOTICE:  could not create an index on immv "mv_self" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -648,7 +648,7 @@ INSERT INTO base_r VALUES (1, 10), (2, 20), (3, 30);
 INSERT INTO base_s VALUES (1, 100), (2, 200), (3, 300);
 SELECT pgivm.create_immv('mv(v1, v2)', 'SELECT r.v, s.v FROM base_r AS r JOIN base_s AS s USING(i)');;
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -720,7 +720,7 @@ ROLLBACK;
 BEGIN;
 SELECT pgivm.create_immv('mv_ivm_exists_subquery', 'SELECT a.i, a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i)');
 NOTICE:  could not create an index on immv "mv_ivm_exists_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -729,7 +729,7 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
 
 SELECT pgivm.create_immv('mv_ivm_exists_subquery2', 'SELECT a.i,a.j FROM mv_base_a a WHERE EXISTS(SELECT 1 FROM mv_base_b b WHERE a.i = b.i) AND a.i > 2');
 NOTICE:  could not create an index on immv "mv_ivm_exists_subquery2" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -883,7 +883,7 @@ ROLLBACK;
 BEGIN;
 SELECT pgivm.create_immv('mv_ivm_subquery', 'SELECT a.i,a.j FROM mv_base_a a,( SELECT * FROM mv_base_b) b WHERE a.i = b.i');
 NOTICE:  could not create an index on immv "mv_ivm_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -948,7 +948,7 @@ HINT:  sublink only supports subquery with EXISTS clause in WHERE clause
 BEGIN;
 SELECT pgivm.create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) tmp');
 NOTICE:  could not create an index on immv "mv_ivm_join_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -981,7 +981,7 @@ BEGIN;
 -- nested subquery
 SELECT pgivm.create_immv('mv_ivm_join_subquery', 'SELECT i, j, k FROM ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN (SELECT * FROM mv_base_a) a USING(i)) tmp');
 NOTICE:  could not create an index on immv "mv_ivm_join_subquery" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1015,7 +1015,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'WITH b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM mv_base_a a, b WHERE a.i = b.i');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1040,7 +1040,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1065,7 +1065,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'WITH b AS ( SELECT * FROM mv_base_b) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1090,7 +1090,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'SELECT * FROM (WITH a AS (SELECT * FROM mv_base_a), b AS ( SELECT * FROM mv_base_b) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1115,7 +1115,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'WITH b AS ( SELECT * FROM (SELECT * FROM mv_base_b) b2) SELECT v.i,v.j FROM (WITH a AS (SELECT * FROM mv_base_a) SELECT a.i,a.j FROM a, b WHERE a.i = b.i) v');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1140,7 +1140,7 @@ BEGIN;
 SELECT pgivm.create_immv('mv_cte',
     'WITH x AS ( SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN mv_base_a a USING(i)) SELECT * FROM x');
 NOTICE:  could not create an index on immv "mv_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1173,7 +1173,7 @@ ROLLBACK;
 BEGIN;
 SELECT pgivm.create_immv('mv_ivm_nested_cte', 'WITH v AS ( WITH a AS (SELECT * FROM mv_base_a) SELECT i, a.j, b.k FROM mv_base_b b INNER JOIN a USING(i)) SELECT * FROM v');
 NOTICE:  could not create an index on immv "mv_ivm_nested_cte" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1209,7 +1209,7 @@ INSERT INTO base_t VALUES (1, 10), (2, 20), (3, 30);
 SELECT pgivm.create_immv('mv_cte_multi(v1, v2)',
  'WITH t AS (SELECT * FROM base_t) SELECT t1.v, t2.v FROM t AS t1 JOIN t AS t2 ON t1.i = t2.i');
 NOTICE:  could not create an index on immv "mv_cte_multi" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1272,7 +1272,7 @@ CREATE TABLE base_t (i int, v int);
 INSERT INTO base_t VALUES (1,10),(2, NULL);
 SELECT pgivm.create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1299,7 +1299,7 @@ BEGIN;
 CREATE TABLE base_t (i int);
 SELECT pgivm.create_immv('mv', 'SELECT * FROM base_t');
 NOTICE:  could not create an index on immv "mv" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1426,7 +1426,7 @@ CREATE TABLE t_mytype (x mytype);
 SELECT pgivm.create_immv('mv_mytype',
  'SELECT * FROM t_mytype');
 NOTICE:  could not create an index on immv "mv_mytype" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1569,7 +1569,7 @@ GRANT ALL on num_tbl TO PUBLIC;
 SET SESSION AUTHORIZATION regress_ivm_user;
 SELECT pgivm.create_immv('ivm_rls', 'SELECT * FROM rls_tbl');
 NOTICE:  could not create an index on immv "ivm_rls" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1615,7 +1615,7 @@ SELECT id, data, owner FROM ivm_rls ORDER BY 1,2,3;
 SET SESSION AUTHORIZATION regress_ivm_user;
 SELECT pgivm.create_immv('ivm_rls2', 'SELECT * FROM rls_tbl JOIN num_tbl USING(id)');
 NOTICE:  could not create an index on immv "ivm_rls2" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1655,7 +1655,7 @@ CREATE TRIGGER trig_update_same AFTER INSERT ON tbl_update_same FOR EACH ROW
  EXECUTE FUNCTION func_update_same();
 SELECT pgivm.create_immv('mv_update_same', 'SELECT * FROM tbl_update_same');
 NOTICE:  could not create an index on immv "mv_update_same" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1721,7 +1721,7 @@ NOTICE:  created index "mv_idx3_index" on immv "mv_idx3"
 --- missing some pkey columns: no index
 SELECT pgivm.create_immv('mv_idx4', 'SELECT j FROM base_a');
 NOTICE:  could not create an index on immv "mv_idx4" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
@@ -1730,16 +1730,56 @@ HINT:  Create an index on the immv for efficient incremental maintenance.
 
 SELECT pgivm.create_immv('mv_idx5', 'SELECT a.i, b.j FROM base_a a, base_b b');
 NOTICE:  could not create an index on immv "mv_idx5" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            0
 (1 row)
 
---- subqueries: create an index
-SELECT pgivm.create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
-NOTICE:  created index "mv_idx6_index" on immv "mv_idx6"
+--- subqueries with all pkey columns or without FROM: create an index
+SELECT pgivm.create_immv('mv_idx6_1(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
+NOTICE:  created index "mv_idx6_1_index" on immv "mv_idx6_1"
+ create_immv 
+-------------
+           0
+(1 row)
+
+SELECT pgivm.create_immv('mv_idx6_2(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT 1 AS i) b');
+NOTICE:  created index "mv_idx6_2_index" on immv "mv_idx6_2"
+ create_immv 
+-------------
+           0
+(1 row)
+
+SELECT pgivm.create_immv('mv_idx6_3(i_a, i_a2, i_b)', 'SELECT a.i, ai.ai, ai.bi FROM base_a a, LATERAL (SELECT a.i AS ai, b.i as bi FROM base_b b) ai');
+NOTICE:  created index "mv_idx6_3_index" on immv "mv_idx6_3"
+ create_immv 
+-------------
+           0
+(1 row)
+
+SELECT pgivm.create_immv('mv_idx6_4(i_a, i_a2)', 'SELECT a.i, a2.i FROM base_a a, LATERAL (SELECT a.i) a2');
+NOTICE:  created index "mv_idx6_4_index" on immv "mv_idx6_4"
+ create_immv 
+-------------
+           0
+(1 row)
+
+--- subqueries missing pkey columns: no index
+SELECT pgivm.create_immv('mv_idx6_5(i_a, j_b)', 'SELECT a.i, b.j FROM base_a a, (SELECT j FROM base_b) b');
+NOTICE:  could not create an index on immv "mv_idx6_5" automatically
+DETAIL:  No unique key could be derived from the view definition.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           0
+(1 row)
+
+SELECT pgivm.create_immv('mv_idx6_6(i_a, i_b, i_a2)', 'SELECT a.i, b.i, b2.ai FROM base_a a, base_b b, LATERAL (SELECT a.i AS ai FROM base_b) b2');
+NOTICE:  could not create an index on immv "mv_idx6_6" automatically
+DETAIL:  No unique key could be derived from the view definition.
+HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------
            0
@@ -1748,8 +1788,25 @@ NOTICE:  created index "mv_idx6_index" on immv "mv_idx6"
 --- with set-returning function: no index
 SELECT pgivm.create_immv('mv_idx7', 'SELECT i FROM base_a, generate_series(1,10)');
 NOTICE:  could not create an index on immv "mv_idx7" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           0
+(1 row)
+
+SELECT pgivm.create_immv('mv_idx8', 'SELECT i, generate_series(1,10) FROM base_a');
+NOTICE:  could not create an index on immv "mv_idx8" automatically
+DETAIL:  No unique key could be derived from the view definition.
+HINT:  Create an index on the immv for efficient incremental maintenance.
+ create_immv 
+-------------
+           0
+(1 row)
+
+--- with EXISTS: create an index
+SELECT pgivm.create_immv('mv_idx9', 'SELECT * FROM base_a a WHERE EXISTS (SELECT 1 FROM base_b b WHERE a.i=b.i)');
+NOTICE:  created index "mv_idx9_index" on immv "mv_idx9"
  create_immv 
 -------------
            0
@@ -1766,7 +1823,7 @@ BEGIN;
 CREATE TABLE table_json (i int, j json);
 SELECT pgivm.create_immv('mv_json', 'SELECT i, j->>''label'' AS label FROM table_json');
 NOTICE:  could not create an index on immv "mv_json" automatically
-DETAIL:  This target list does not have all the primary key columns, or this view does not contain GROUP BY or DISTINCT clause.
+DETAIL:  No unique key could be derived from the view definition.
 HINT:  Create an index on the immv for efficient incremental maintenance.
  create_immv 
 -------------

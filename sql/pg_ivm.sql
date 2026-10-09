@@ -700,11 +700,22 @@ SELECT pgivm.create_immv('mv_idx3(i_a, i_b)', 'SELECT a.i, b.i FROM base_a a, ba
 SELECT pgivm.create_immv('mv_idx4', 'SELECT j FROM base_a');
 SELECT pgivm.create_immv('mv_idx5', 'SELECT a.i, b.j FROM base_a a, base_b b');
 
---- subqueries: create an index
-SELECT pgivm.create_immv('mv_idx6(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
+--- subqueries with all pkey columns or without FROM: create an index
+SELECT pgivm.create_immv('mv_idx6_1(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT * FROM base_b) b');
+SELECT pgivm.create_immv('mv_idx6_2(i_a, i_b)', 'SELECT a.i, b.i FROM (SELECT * FROM base_a) a, (SELECT 1 AS i) b');
+SELECT pgivm.create_immv('mv_idx6_3(i_a, i_a2, i_b)', 'SELECT a.i, ai.ai, ai.bi FROM base_a a, LATERAL (SELECT a.i AS ai, b.i as bi FROM base_b b) ai');
+SELECT pgivm.create_immv('mv_idx6_4(i_a, i_a2)', 'SELECT a.i, a2.i FROM base_a a, LATERAL (SELECT a.i) a2');
+
+--- subqueries missing pkey columns: no index
+SELECT pgivm.create_immv('mv_idx6_5(i_a, j_b)', 'SELECT a.i, b.j FROM base_a a, (SELECT j FROM base_b) b');
+SELECT pgivm.create_immv('mv_idx6_6(i_a, i_b, i_a2)', 'SELECT a.i, b.i, b2.ai FROM base_a a, base_b b, LATERAL (SELECT a.i AS ai FROM base_b) b2');
 
 --- with set-returning function: no index
 SELECT pgivm.create_immv('mv_idx7', 'SELECT i FROM base_a, generate_series(1,10)');
+SELECT pgivm.create_immv('mv_idx8', 'SELECT i, generate_series(1,10) FROM base_a');
+
+--- with EXISTS: create an index
+SELECT pgivm.create_immv('mv_idx9', 'SELECT * FROM base_a a WHERE EXISTS (SELECT 1 FROM base_b b WHERE a.i=b.i)');
 
 ROLLBACK;
 
