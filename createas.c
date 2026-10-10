@@ -286,8 +286,9 @@ check_immv_compatibility(Oid matviewOid, List *tlist, IntoClause *into)
 		}
 	}
 
-	while (TupleDescAttr(tupdesc, i)->attisdropped)
+	while (i < tupdesc->natts && TupleDescAttr(tupdesc, i)->attisdropped)
 		i++;
+
 	if (i < tupdesc->natts)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
