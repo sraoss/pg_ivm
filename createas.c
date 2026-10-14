@@ -304,7 +304,8 @@ check_immv_compatibility(Oid matviewOid, List *tlist, IntoClause *into)
  */
 ObjectAddress
 ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-				  QueryCompletion *qc, Oid matviewOid)
+				  QueryCompletion *qc, Oid matviewOid,
+				  bool replace)
 {
 	Query	   *query = castNode(Query, stmt->query);
 	Query	   *rewritten;
@@ -321,16 +322,15 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	}
 	else
 	{
-		matviewRel = table_open(matviewOid, NoLock);
-
+		/* Remove the IMMV entry if replace option is specified */
+		if (replace)
+			RemoveImmvEntry(matviewOid);
 		/* check if metadata not exists */
-		if (get_immv_query(matviewRel))
+		else if (isImmv(matviewOid))
 			ereport(ERROR,
 					(errcode(ERRCODE_DUPLICATE_OBJECT),
 					 errmsg("relation \"%s\" is already registered as an IMMV",
 							into->rel->relname)));
-
-		table_close(matviewRel, NoLock);
 	}
 
 	/*
@@ -358,6 +358,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 	/* For IMMV, we need to rewrite matview query */
 	rewritten = rewriteQueryForIMMV(query, into->colNames);
 
+	/* create_immv */
 	if (!OidIsValid(matviewOid))
 		/*
 		 * If WITH NO DATA was specified, do not go through the rewriter,
@@ -366,6 +367,7 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		 * from running the planner before all dependencies are set up.
 		 */
 		address = create_immv_nodata(rewritten->targetList, into);
+	/* restore_immv */
 	else
 	{
 		/* check table compatibility */
