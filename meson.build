@@ -65,6 +65,7 @@ install_data(
   'pg_ivm--1.13--1.14.sql',
   'pg_ivm--1.14--1.15.sql',
   'pg_ivm--1.15--1.16.sql',
+  'pg_ivm--1.16--1.17.sql',
   'pg_ivm.control',
   install_dir: sharedir / 'extension',
 )

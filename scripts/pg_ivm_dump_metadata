@@ -1,4 +1,11 @@
 #!/bin/sh
 
+pg_upgrade=false
+
+if [ "$1" = "--pg-upgrade" ]; then
+    pg_upgrade=true
+    shift
+fi
+
 psql "$@" -XAtqc \
-'SELECT * FROM pgivm.get_restore_immv_commands()'
+    "SELECT * FROM pgivm.get_restore_immv_commands($pg_upgrade)"

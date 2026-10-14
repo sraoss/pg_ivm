@@ -32,13 +32,15 @@
 extern void CreateChangePreventTrigger(Oid matviewOid);
 extern Oid PgIvmImmvRelationId(void);
 extern Oid PgIvmImmvPrimaryKeyIndexId(void);
+extern void RemoveImmvEntry(Oid oid);
 extern bool isImmv(Oid immv_oid);
 extern List *PgIvmFuncName(char *name);
 
 /* createas.c */
 
 extern ObjectAddress ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
-									QueryCompletion *qc, Oid matviewOid);
+									QueryCompletion *qc, Oid matviewOid,
+									bool replace);
 extern void CreateIvmTriggersOnBaseTables(Query *qry, Oid matviewOid);
 extern void CreateIndexOnIMMV(Query *query, Relation matviewRel);
 extern Query *rewriteQueryForIMMV(Query *query, List *colNames);

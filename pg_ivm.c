@@ -22,6 +22,7 @@
 #include "catalog/pg_trigger_d.h"
 #include "commands/tablecmds.h"
 #include "commands/trigger.h"
+#include "miscadmin.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
 #include "parser/scansup.h"
@@ -236,7 +237,8 @@ create_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *) ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc, InvalidOid);
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, &qc,
+				   InvalidOid, false);
 
 	PG_RETURN_INT64(qc.nprocessed);
 }
@@ -250,6 +252,7 @@ restore_immv(PG_FUNCTION_ARGS)
 	text	*t_relname = PG_GETARG_TEXT_PP(0);
 	text	*t_sql = PG_GETARG_TEXT_PP(1);
 	bool	populate = PG_GETARG_BOOL(2);
+	bool	replace = PG_GETARG_BOOL(3);
 	char	*relname = text_to_cstring(t_relname);
 	char	*sql = text_to_cstring(t_sql);
 	List	*parsetree_list;
@@ -265,17 +268,15 @@ restore_immv(PG_FUNCTION_ARGS)
 
 	immv = makeRangeVarFromNameList(textToQualifiedNameList(t_relname));
 
-#if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 170000)
+	if (replace && !superuser())
+		ereport(ERROR,
+				errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				errmsg("must be superuser to use restore_immv() with replace option"));
+
 	matviewOid = RangeVarGetRelidExtended(immv,
 										  AccessExclusiveLock, 0,
-										  RangeVarCallbackOwnsTable,
+										  RangeVarCallbackOwnsRelation,
 										  NULL);
-#else
-	matviewOid = RangeVarGetRelidExtended(immv,
-										  AccessExclusiveLock, 0,
-										  RangeVarCallbackMaintainsTable,
-										  NULL);
-#endif
 
 	initStringInfo(&command_buf);
 	appendStringInfo(&command_buf, "SELECT restore_immv('%s', '%s');", relname, sql);
@@ -321,7 +322,8 @@ restore_immv(PG_FUNCTION_ARGS)
 	query = transformStmt(pstate, (Node *) ctas);
 	Assert(query->commandType == CMD_UTILITY && IsA(query->utilityStmt, CreateTableAsStmt));
 
-	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, NULL, matviewOid);
+	ExecCreateImmv(pstate, (CreateTableAsStmt *) query->utilityStmt, NULL,
+				   matviewOid, replace);
 
 	PG_RETURN_VOID();
 }
@@ -475,40 +477,46 @@ PgIvmObjectAccessHook(ObjectAccessType access, Oid classId,
 		PrevObjectAccessHook(access, classId, objectId, subId, arg);
 
 	if (access == OAT_DROP && classId == RelationRelationId && !OidIsValid(subId))
-	{
-		Relation pgIvmImmv;
-		SysScanDesc scan;
-		ScanKeyData key;
-		HeapTuple tup;
-		Oid pgIvmImmvOid = PgIvmImmvRelationId();
+		RemoveImmvEntry(objectId);
+}
 
-		Oid pgIvmImmvPkOid = PgIvmImmvPrimaryKeyIndexId();
+/*
+ * Remove the IMMV entry from pg_ivm_immv
+ */
+void
+RemoveImmvEntry(Oid oid)
+{
+	Relation pgIvmImmv;
+	SysScanDesc scan;
+	ScanKeyData key;
+	HeapTuple tup;
+	Oid pgIvmImmvOid = PgIvmImmvRelationId();
+	Oid pgIvmImmvPkOid = PgIvmImmvPrimaryKeyIndexId();
 
-		/*
-		 * Index or table not yet created (so no IMMVs yet), already dropped
-		 * (expect IMMVs also gone soon), or renamed.  It's not great that a
-		 * rename of either object will silently break IMMVs, but that's
-		 * better than ERROR below.
-		 */
-		if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
-			return;
+	/*
+	 * Index or table not yet created (so no IMMVs yet), already dropped
+	 * (expect IMMVs also gone soon), or renamed.  It's not great that a
+	 * rename of either object will silently break IMMVs, but that's
+	 * better than ERROR below.
+	 */
+	if (pgIvmImmvPkOid == InvalidOid || pgIvmImmvOid == InvalidOid)
+		return;
 
-		pgIvmImmv = table_open(pgIvmImmvOid, AccessShareLock);
-		ScanKeyInit(&key,
-					Anum_pg_ivm_immv_immvrelid,
-					BTEqualStrategyNumber, F_OIDEQ,
-					ObjectIdGetDatum(objectId));
-		scan = systable_beginscan(pgIvmImmv, pgIvmImmvPkOid,
-								  true, NULL, 1, &key);
+	pgIvmImmv = table_open(pgIvmImmvOid, RowExclusiveLock);
+	ScanKeyInit(&key,
+				Anum_pg_ivm_immv_immvrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(oid));
+	scan = systable_beginscan(pgIvmImmv, pgIvmImmvPkOid,
+							  true, NULL, 1, &key);
 
-		tup = systable_getnext(scan);
+	tup = systable_getnext(scan);
 
-		if (HeapTupleIsValid(tup))
-			CatalogTupleDelete(pgIvmImmv, &tup->t_self);
+	if (HeapTupleIsValid(tup))
+		CatalogTupleDelete(pgIvmImmv, &tup->t_self);
 
-		systable_endscan(scan);
-		table_close(pgIvmImmv, NoLock);
-	}
+	systable_endscan(scan);
+	table_close(pgIvmImmv, NoLock);
 }
 
 /*
