@@ -87,7 +87,7 @@ static Bitmapset *get_primary_key_attnos_from_query(Query *query, List **constra
 static bool is_equijoin_condition(OpExpr *op, check_ivm_restriction_context *context);
 static bool check_aggregate_supports_ivm(Oid aggfnoid);
 
-static void StoreImmvQuery(Oid viewOid, Query *viewQuery);
+static void StoreImmvQuery(Oid viewOid, Query *viewQuery, bool ispopulated);
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM < 140000)
 static bool CreateTableAsRelExists(CreateTableAsStmt *ctas);
@@ -159,9 +159,9 @@ create_immv_internal(List *attrList, IntoClause *into)
 
 	/* Create the "view" part of an IMMV. */
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
-	StoreImmvQuery(intoRelationAddr.objectId, into->viewQuery);
+	StoreImmvQuery(intoRelationAddr.objectId, into->viewQuery, false);
 #else
-	StoreImmvQuery(intoRelationAddr.objectId, (Query *) into->viewQuery);
+	StoreImmvQuery(intoRelationAddr.objectId, (Query *) into->viewQuery, false);
 #endif
 
 	CommandCounterIncrement();
@@ -373,10 +373,16 @@ ExecCreateImmv(ParseState *pstate, CreateTableAsStmt *stmt,
 		/* check table compatibility */
 		check_immv_compatibility(matviewOid, rewritten->targetList, into);
 
+		/*
+		 * With populate = false the existing contents are kept and the
+		 * triggers are created below, so the IMMV is already populated.
+		 * With populate = true, RefreshImmvByOid() sets the flag and creates
+		 * the triggers.
+		 */
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 180000)
-		StoreImmvQuery(matviewOid, into->viewQuery);
+		StoreImmvQuery(matviewOid, into->viewQuery, !do_refresh);
 #else
-		StoreImmvQuery(matviewOid, (Query *) into->viewQuery);
+		StoreImmvQuery(matviewOid, (Query *) into->viewQuery, !do_refresh);
 #endif
 	}
 
@@ -2057,7 +2063,7 @@ get_primary_key_attnos_from_query(Query *query, List **constraintList)
  * Store the query for the IMMV to pg_ivm_immv
  */
 static void
-StoreImmvQuery(Oid viewOid, Query *viewQuery)
+StoreImmvQuery(Oid viewOid, Query *viewQuery, bool ispopulated)
 {
 	char   *querytree = nodeToString((Node *) viewQuery);
 	Datum values[Natts_pg_ivm_immv];
@@ -2071,7 +2077,7 @@ StoreImmvQuery(Oid viewOid, Query *viewQuery)
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[Anum_pg_ivm_immv_immvrelid -1 ] = ObjectIdGetDatum(viewOid);
-	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(false);
+	values[Anum_pg_ivm_immv_ispopulated -1 ] = BoolGetDatum(ispopulated);
 	values[Anum_pg_ivm_immv_viewdef -1 ] = CStringGetTextDatum(querytree);
 	isNulls[Anum_pg_ivm_immv_lastivmupdate -1 ] = true;
 
