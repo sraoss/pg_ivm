@@ -10,7 +10,7 @@
 
 Summary:	Incremental View Maintenance (IVM) feature for PostgreSQL.
 Name:		%{sname}_%{pgmajorversion}
-Version:	1.16
+Version:	1.17
 Release:	1%{dist}
 License:    PostgreSQL
 Vendor:     IVM Development Group
@@ -55,6 +55,8 @@ PATH=%{pginstdir}/bin:$PATH %{__make} %{?_smp_mflags} INSTALL_PREFIX=%{buildroot
 %endif
 
 %changelog
+* Sun Oct 18 2026 - Yugo Nagata <nagata@sraoss.co.jp> 1.17-1
+- Update to 1.17
 * Wed Sep 30 2026 - Yugo Nagata <nagata@sraoss.co.jp> 1.16-1
 - Update to 1.16
 * Mon Jun 30 2026 - Yugo Nagata <nagata@sraoss.co.jp> 1.15-1
