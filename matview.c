@@ -1792,7 +1792,7 @@ get_prestate_rte(RangeTblEntry *rte, MV_TriggerTable *table,
 		if (no_default_eqop && num_except > 0)
 			appendStringInfo(&str,") AS sub(t)");
 
-		appendStringInfo(&str,") AS %s", aliasname);
+		appendStringInfo(&str,") AS %s", quote_identifier(aliasname));
 	}
 
 	/* Get a subquery representing pre-state of the table */
@@ -1976,7 +1976,7 @@ makeDeltaTable(RangeTblEntry *rte, MV_TriggerTable *table,
 	if (no_default_eqop && num_except > 0)
 		appendStringInfo(&str,") AS sub(t)");
 
-	appendStringInfo(&str,") AS %s", aliasname);
+	appendStringInfo(&str,") AS %s", quote_identifier(aliasname));
 
 #if defined(PG_VERSION_NUM) && (PG_VERSION_NUM >= 140000)
 	raw = (RawStmt*)linitial(raw_parser(str.data, RAW_PARSE_DEFAULT));
