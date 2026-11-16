@@ -748,3 +748,35 @@ SELECT 'mv_base_b'::regclass, pgivm.get_immv_def('mv_base_b');
 
 DROP TABLE mv_base_b CASCADE;
 DROP TABLE mv_base_a CASCADE;
+
+-- self-join with GROUP BY and MIN/MAX: a group that is emptied by the
+-- modification must not make the recalculation of min/max fail
+BEGIN;
+CREATE TABLE mv_selfjoin_t (id int PRIMARY KEY, j int, g int, v int);
+INSERT INTO mv_selfjoin_t VALUES (7, 2, 0, 2), (9, NULL, 0, 2);
+SELECT pgivm.create_immv('mv_selfjoin_min',
+  'SELECT r1.g AS g0, MIN(r0.g) AS a0 FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g');
+SELECT pgivm.create_immv('mv_selfjoin_max',
+  'SELECT r1.g AS g0, MAX(r0.g) AS a0 FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g');
+SELECT g0, a0 FROM mv_selfjoin_min ORDER BY 1;
+SELECT g0, a0 FROM mv_selfjoin_max ORDER BY 1;
+
+UPDATE mv_selfjoin_t SET g = -1, v = 1 WHERE id = 7;
+SELECT g0, a0 FROM mv_selfjoin_min ORDER BY 1;
+SELECT g0, a0 FROM mv_selfjoin_max ORDER BY 1;
+
+-- the IMMVs must match a full recomputation
+SELECT (SELECT count(*) FROM (SELECT g0, a0 FROM mv_selfjoin_min EXCEPT
+  SELECT r1.g, MIN(r0.g) FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g) d1) AS min_missing,
+  (SELECT count(*) FROM (SELECT r1.g, MIN(r0.g) FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g
+  EXCEPT SELECT g0, a0 FROM mv_selfjoin_min) d2) AS min_extra,
+  (SELECT count(*) FROM (SELECT g0, a0 FROM mv_selfjoin_max EXCEPT
+  SELECT r1.g, MAX(r0.g) FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g) d3) AS max_missing,
+  (SELECT count(*) FROM (SELECT r1.g, MAX(r0.g) FROM mv_selfjoin_t r0 JOIN mv_selfjoin_t r1 ON r0.v = r1.j GROUP BY r1.g
+  EXCEPT SELECT g0, a0 FROM mv_selfjoin_max) d4) AS max_extra;
+
+-- delete the row that is the only join partner left
+DELETE FROM mv_selfjoin_t WHERE id = 7;
+SELECT g0, a0 FROM mv_selfjoin_min ORDER BY 1;
+SELECT g0, a0 FROM mv_selfjoin_max ORDER BY 1;
+ROLLBACK;
