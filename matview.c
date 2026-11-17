@@ -3989,8 +3989,18 @@ recalc_and_set_values(SPITupleTable *tuptable_recalc, int64 num_tuples,
 		plan = get_plan_for_recalc(matviewRel, namelist, keys, keyTypes);
 		if (SPI_execute_plan(plan, keyVals, keyNulls, false, 0) != SPI_OK_SELECT)
 			elog(ERROR, "SPI_execute_plan");
-		if (SPI_processed != 1)
-			elog(ERROR, "SPI_execute_plan returned zero or more than one rows");
+		if (SPI_processed > 1)
+			elog(ERROR, "SPI_execute_plan returned more than one row");
+
+		/*
+		 * The view tuple may have no counterpart in the base tables. A self-join
+		 * is maintained one table reference at a time, so the view can be in an
+		 * intermediate state while the base tables are already in the
+		 * post-update state. In that case a delta applied later is expected to
+		 * delete this tuple, so there is nothing to set now.
+		 */
+		if (SPI_processed == 0)
+			continue;
 
 		tuptable_newvals = SPI_tuptable;
 		tupdesc_newvals = tuptable_newvals->tupdesc;
@@ -4000,8 +4010,7 @@ recalc_and_set_values(SPITupleTable *tuptable_recalc, int64 num_tuples,
 		/* Set the new values as parameters */
 		for (j = 0; j < tupdesc_newvals->natts; j++)
 		{
-			if (i == 0)
-				types[j] = TupleDescAttr(tupdesc_newvals, j)->atttypid;
+			types[j] = TupleDescAttr(tupdesc_newvals, j)->atttypid;
 
 			vals[j] = SPI_getbinval(tuptable_newvals->vals[0], tupdesc_newvals, j + 1, &isnull);
 			if (isnull)
